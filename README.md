@@ -4,6 +4,16 @@
 
 This repository demonstrates how to use the [letsql](https://www.letsql.com/) library to exchange data between DuckDB instances using Arrow Flight, showcasing high-performance streaming data transfer and custom exchange protocols.
 
+## Usage of letsql in the Project
+
+The letsql solution enables custom Flight actions and exchangers, allowing the server to support dynamic streaming queries and efficiently handle large-scale data transfers. It is used to:
+
+- Import Key Classes: AddExchangeAction and AbstractExchanger provide the foundation for defining and handling custom data exchange mechanisms.
+- Define a Custom Exchanger: MyStreamingExchanger, inheriting from AbstractExchanger, processes incoming data in a streaming fashion and returns transformed results.
+- Handle Custom Actions: The do_action method in DuckDBFlightServer dynamically registers exchangers using AddExchangeAction, enabling runtime flexibility.
+
+By integrating letsql, the system supports high-performance, real-time data streaming.
+
 ## ✨ Features
 
 - **Two DuckDB Flight Servers**: Each listening on a unique gRPC endpoint
@@ -15,11 +25,11 @@ This repository demonstrates how to use the [letsql](https://www.letsql.com/) li
 ## 📂 Repository Structure
 
 ```bash
-├── _data/              # Data files
-│   └── flights.parquet  # Example dataset for testing
-├── flight_server.py     # DuckDB Flight servers with auth & custom protocols
-├── demo.py             # Client demonstrating data exchange & benchmarking
-└── README.md          # This documentation
+├── _data/                # Data files
+│   └── flights.parquet   # Example dataset for testing
+├── flight_server.py      # DuckDB Flight servers with auth & custom protocols
+├── demo.py               # Client demonstrating data exchange & benchmarking
+└── README.md             # This documentation
 ```
 
 ### flight_server.py
