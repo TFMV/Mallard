@@ -23,7 +23,6 @@ SERVER_CONFIGS = [
     {"db_path": "duckwings2.db", "location": "grpc://localhost:8816"},
 ]
 
-# Your custom exchanger class
 class MyStreamingExchanger(AbstractExchanger):
     command = "my_streaming_exchanger"
 
@@ -32,13 +31,14 @@ class MyStreamingExchanger(AbstractExchanger):
         incoming_batches = []
         for chunk in reader:
             incoming_batches.append(chunk)
-        
+
         # Echo the data back
         if incoming_batches:
             writer.begin(incoming_batches[0].schema)
             for batch in incoming_batches:
                 writer.write_batch(batch)
         writer.close()
+
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -112,24 +112,40 @@ class DuckDBFlightServer(flight.FlightServerBase):
 
     def __init__(self, db_path: str, location: str):
         super().__init__(location)
-        # ✅ Ensure we have absolute path and create parent dirs if needed
         self.db_path = os.path.abspath(db_path)
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
-
-        # ✅ Initialize DuckDB with proper settings
+        
+        # Initialize DuckDB
         self.conn = duckdb.connect(self.db_path, read_only=False)
         self.location = location
-
         self.middleware = {
             "auth": BasicAuthServerMiddlewareFactory({"admin": "password123"})
         }
         self._running = True
         self.exchangers = {}
-        logger.info(f"Connected to DuckDB at {self.db_path}")
+        
+        # Add health check query to verify DB is ready
+        try:
+            self.conn.execute("SELECT 1")
+            logger.info(f"✅ Connected to DuckDB at {self.db_path}")
+        except Exception as e:
+            logger.error(f"Failed to connect to DuckDB at {self.db_path}: {e}")
+            raise
 
+    def health_check(self) -> bool:
+        """Verify server and database are operational."""
+        try:
+            self.conn.execute("SELECT 1")
+            return True
+        except Exception as e:
+            logger.error(f"Health check failed: {e}")
+            return False
 
     def serve_with_shutdown(self):
         """Runs the server until the shutdown event is set."""
+        if not self.health_check():
+            raise RuntimeError(f"Server at {self.location} failed health check")
+            
         logger.info(f"Server started at {self.location}. Press Ctrl+C to stop.")
         try:
             self.serve()
@@ -144,25 +160,21 @@ class DuckDBFlightServer(flight.FlightServerBase):
         command = descriptor.command.decode("utf-8")
 
         if command in self.exchangers:
-            # ✅ Route to the correct exchanger
             logger.info(f"Executing exchanger: {command}")
             return self.exchangers[command].exchange_f(context, reader, writer)
 
         else:
-            # ❌ If it's not an exchanger, treat it as a SQL query
             logger.info(f"Executing SQL query: {command}")
             try:
                 result_table = self.conn.sql(command).fetch_arrow_table()
 
-                # ✅ Begin writer session with schema
                 writer.begin(result_table.schema)
 
-                # ✅ Stream results
                 for batch in result_table.to_batches():
                     writer.write_batch(batch)
 
                 writer.close()
-                logger.info("✅ Streaming query complete.")
+                logger.info("Streaming query complete.")
 
             except Exception as e:
                 logger.exception(f"Error in do_exchange: {e}")
@@ -213,14 +225,16 @@ class DuckDBFlightServer(flight.FlightServerBase):
         """Handles custom actions (e.g., registering an exchange)."""
         try:
             if isinstance(action.type, bytes):
-                action_type = action.type.decode('utf-8')
+                action_type = action.type.decode("utf-8")
             else:
                 action_type = action.type
-            
+
             if action_type == AddExchangeAction.name:
                 exchange_cls = loads(action.body.to_pybytes())
                 if issubclass(exchange_cls, AbstractExchanger):
-                    self.exchangers[exchange_cls.command] = exchange_cls()  # Create instance
+                    self.exchangers[exchange_cls.command] = (
+                        exchange_cls()
+                    )  # Create instance
                     logger.info(f"Registered exchange: {exchange_cls.command}")
                     return []
             raise flight.FlightServerError(f"Unknown action: {action_type}")
@@ -258,6 +272,8 @@ def handle_shutdown(signum, frame):
 if __name__ == "__main__":
     # Register signal handler for Ctrl+C
     signal.signal(signal.SIGINT, handle_shutdown)
+    signal.signal(signal.SIGTERM, handle_shutdown)
+    signal.signal(signal.SIGABRT, handle_shutdown)
 
     try:
         # Start the servers
