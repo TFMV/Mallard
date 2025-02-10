@@ -169,3 +169,17 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+db/
+obsolete/
+
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz
+
+*.db
+*.wal
+data/
+*.parquet
