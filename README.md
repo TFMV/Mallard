@@ -15,15 +15,12 @@ This repository demonstrates how to use the [letsql](https://www.letsql.com/) li
 ## 📂 Repository Structure
 
 ```bash
+├── _data/              # Data files
+│   └── flights.parquet  # Example dataset for testing
 ├── flight_server.py     # DuckDB Flight servers with auth & custom protocols
 ├── demo.py             # Client demonstrating data exchange & benchmarking
 └── README.md          # This documentation
 ```
-
-## 📂 Data
-
-Please note that the flights.parquet file is not included in the repository.
-You can download it from [here](https://www.kaggle.com/datasets/shubhama/flights-data-1949-1960).
 
 ### flight_server.py
 
