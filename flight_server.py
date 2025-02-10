@@ -23,6 +23,33 @@ SERVER_CONFIGS = [
     {"db_path": "duckwings2.db", "location": "grpc://localhost:8816"},
 ]
 
+# Your custom exchanger class
+class MyStreamingExchanger(AbstractExchanger):
+    command = "my_streaming_exchanger"
+
+    def exchange_f(self, context, reader, writer):
+        # Process incoming data
+        incoming_batches = []
+        for chunk in reader:
+            incoming_batches.append(chunk)
+        
+        # Echo the data back
+        if incoming_batches:
+            writer.begin(incoming_batches[0].schema)
+            for batch in incoming_batches:
+                writer.write_batch(batch)
+        writer.close()
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("DuckWings")
+
+# Default configurations
+SERVER_CONFIGS = [
+    {"db_path": "duckwings1.db", "location": "grpc://localhost:8815"},
+    {"db_path": "duckwings2.db", "location": "grpc://localhost:8816"},
+]
+
 # Shutdown event to signal all servers to stop
 shutdown_event = Event()
 
@@ -88,11 +115,11 @@ class DuckDBFlightServer(flight.FlightServerBase):
         # ✅ Ensure we have absolute path and create parent dirs if needed
         self.db_path = os.path.abspath(db_path)
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
-        
+
         # ✅ Initialize DuckDB with proper settings
         self.conn = duckdb.connect(self.db_path, read_only=False)
         self.location = location
-        
+
         self.middleware = {
             "auth": BasicAuthServerMiddlewareFactory({"admin": "password123"})
         }
@@ -184,13 +211,22 @@ class DuckDBFlightServer(flight.FlightServerBase):
 
     def do_action(self, context, action):
         """Handles custom actions (e.g., registering an exchange)."""
-        if action.type == AddExchangeAction.name:
-            exchange_cls = loads(action.body.to_pybytes())
-            if issubclass(exchange_cls, AbstractExchanger):
-                self.exchangers[exchange_cls.command] = exchange_cls
-                logger.info(f"Registered exchange: {exchange_cls.command}")
-                return []
-        raise flight.FlightServerError(f"Unknown action: {action.type}")
+        try:
+            if isinstance(action.type, bytes):
+                action_type = action.type.decode('utf-8')
+            else:
+                action_type = action.type
+            
+            if action_type == AddExchangeAction.name:
+                exchange_cls = loads(action.body.to_pybytes())
+                if issubclass(exchange_cls, AbstractExchanger):
+                    self.exchangers[exchange_cls.command] = exchange_cls()  # Create instance
+                    logger.info(f"Registered exchange: {exchange_cls.command}")
+                    return []
+            raise flight.FlightServerError(f"Unknown action: {action_type}")
+        except Exception as e:
+            logger.exception(f"Error in do_action: {e}")
+            raise
 
 
 def start_server(server_config):
