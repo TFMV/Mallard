@@ -49,7 +49,7 @@ This repository demonstrates how to use the letsql library to exchange data betw
            │                         │
            │ (gRPC/Arrow Flight)     │
            │                         │
-      ┌─────▼────────────────────────▼─────┐
+      ┌────▼─-───────────────────────▼─────┐
       │        demo.py (Flight Client)     │
       │  - do_get, do_put, do_exchange     │
       │  - verifies, benchmarks, logs      │
@@ -62,7 +62,7 @@ This repository demonstrates how to use the letsql library to exchange data betw
 - Required packages:
 
 ```bash
-pip install duckdb pyarrow pyarrow[flight] cloudpickle letsql
+pip install -r requirements.txt
 ```
 
 ## 🚀 Quick Start
@@ -104,8 +104,8 @@ The demo script performs these operations:
 
 Recent benchmarks show:
 
-- Send throughput: 140M+ rows/second
-- Receive throughput: 50M+ rows/second
+- Send throughput: ~240M rows/second
+- Receive throughput: ~60M rows/second
 - Successfully tested with 200M+ row datasets
 
 *Note: Actual performance depends on hardware, network, and dataset characteristics.*

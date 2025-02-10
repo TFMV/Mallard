@@ -3,7 +3,7 @@ import duckdb
 import pyarrow as pa
 import pyarrow.flight as flight
 from pyarrow.flight import FlightDescriptor, Ticket
-
+import sys
 from letsql.flight.action import AddExchangeAction
 from letsql.flight.exchanger import AbstractExchanger
 
@@ -28,7 +28,38 @@ def verify_flight_connection():
     print("\nConnection Verified:\n", reader.read_all())
 
 
-verify_flight_connection()
+def wait_for_servers(timeout=30):
+    """Wait for both servers to be ready."""
+    start = time.time()
+    servers = [(SERVER1, client1), (SERVER2, client2)]
+    
+    while time.time() - start < timeout:
+        all_ready = True
+        for location, client in servers:
+            try:
+                # Try a simple query to check if server is responsive
+                reader = client.do_get(Ticket(b"SELECT 1"))
+                reader.read_all()
+            except Exception as e:
+                all_ready = False
+                print(f"Waiting for {location}... ({e.__class__.__name__})")
+                break
+        
+        if all_ready:
+            print("Both servers ready!")
+            return True
+            
+        time.sleep(1)
+    
+    raise RuntimeError(f"Servers not ready after {timeout} seconds")
+
+# Replace the simple connection code with handshake
+try:
+    wait_for_servers()
+except Exception as e:
+    print(f"Failed to connect to servers: {e}")
+    sys.exit(1)
+
 
 ###############################################################################
 # 2) Simple example: create & move a small table "foo" from Server1 → Server2
