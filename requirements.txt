@@ -1,0 +1,9 @@
+duckdb
+pyarrow
+pyarrow[flight]
+pandas
+protobuf
+grpcio
+grpcio-tools
+letsql[all]
+cloudpickle
