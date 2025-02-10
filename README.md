@@ -2,26 +2,28 @@
 
 ## High-Performance Data Exchange
 
-This repository demonstrates how to use the letsql library to exchange data between DuckDB instances using Arrow Flight, showcasing high-performance streaming data transfer and custom exchange protocols.
+This repository demonstrates how to use the [letsql](https://www.letsql.com/) library to exchange data between DuckDB instances using Arrow Flight, showcasing high-performance streaming data transfer and custom exchange protocols.
 
 ## ✨ Features
 
 - **Two DuckDB Flight Servers**: Each listening on a unique gRPC endpoint
 - **Basic Authentication**: Username/password + token-based session management
 - **Custom Exchangers**: Advanced streaming with inline transformations
-- **High Performance**: 140M+ rows/second throughput in testing
+- **High Performance**: 240M+ rows/second throughput in testing
 - **Large Dataset Support**: Successfully tested with 200M+ row datasets
 
 ## 📂 Repository Structure
 
 ```bash
-.
 ├── flight_server.py     # DuckDB Flight servers with auth & custom protocols
 ├── demo.py             # Client demonstrating data exchange & benchmarking
-├── data/
-│   └── flights.parquet # Example dataset for testing
 └── README.md          # This documentation
 ```
+
+## 📂 Data
+
+Please note that the flights.parquet file is not included in the repository.
+You can download it from [here](https://www.kaggle.com/datasets/shubhama/flights-data-1949-1960).
 
 ### flight_server.py
 

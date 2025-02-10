@@ -285,7 +285,7 @@ def run_my_streaming_exchange_demo():
     send_time = time.time() - send_start
     send_throughput = total_rows / send_time if send_time > 0 else 0
     
-    print(f"\n✅ Client sent:")
+    print("\nClient sent:")
     print(f"• {total_rows:,} rows")
     print(f"• {batch_count:,} batches")
     print(f"• {send_time:.2f} seconds")
@@ -309,14 +309,14 @@ def run_my_streaming_exchange_demo():
     read_time = time.time() - read_start
     read_throughput = received_rows / read_time if read_time > 0 else 0
 
-    print(f"\n✅ Client received:")
+    print(f"\nClient received:")
     print(f"• {received_rows:,} rows")
     print(f"• {received_batches:,} batches")
     print(f"• {read_time:.2f} seconds")
     print(f"• {read_throughput:,.0f} rows/second")
 
     total_time = time.time() - start_time
-    print(f"\n🚀 Total exchange completed in {total_time:.2f} sec")
+    print(f"\nTotal exchange completed in {total_time:.2f} sec")
 
     if all_returned:
         result_table = pa.Table.from_batches(all_returned)

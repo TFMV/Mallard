@@ -181,5 +181,4 @@ obsolete/
 
 *.db
 *.wal
-data/
-*.parquet
+*.lfs
