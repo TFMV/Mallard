@@ -152,7 +152,7 @@ Instead of pulling & processing data in bulk, we move it at the speed of memory.
 
 ## The Code
 
-The code is available on GitHub but imagine if Flight servers, clients, and exchangers were this simple:
+The code is available on [GitHub](https://github.com/TFMV/letsql-demo) but imagine if Flight servers, clients, and exchangers were this simple:
 
 ### 1️⃣ Spin up a Flight Server
 
@@ -196,15 +196,17 @@ A single object that abstracts Flight tickets, descriptors, and connections—in
 Instead of manually reading Arrow RecordBatches, transforming data, and writing results,
 this would let you plug in a streaming transformer like a first-class citizen.
 
-## ⚡ Where LetSQL is Today
+## Where LetSQL Stands Today
 
-This isn't how LetSQL works yet—but it could be.
+LetSQL is powerful, but setting up Flight Servers, Clients, and Exchangers still requires some boilerplate.
 
-Right now, setting up Flight Servers, Clients, and Exchangers requires some boilerplate.
+It doesn’t have to.
 
-Wouldn't it be better if LetSQL exposed a declarative, easy-to-use API like this?
+Imagine a world where defining a Flight server is as simple as declaring a function. Where clients and exchangers are first-class citizens—plug-and-play, no friction, no clutter.
 
-LetSQL already does the hard work and the team at LetSQL is actively working on it.
+LetSQL already does the heavy lifting. A declarative, intuitive API would make that power truly effortless.
+
+And the best part? The LetSQL team is already working on it.
 
 ## The Future: A Fully Declarative LetSQL
 
