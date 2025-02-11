@@ -83,7 +83,7 @@ LetSQL didn't just make Arrow Flight faster; it made it practical.
 - Concurrency & Multi-threading: LetSQL taps directly into DataFusion's parallel query engine, handling workloads Go struggles with.
 - Seamless Integration with DataFusion: A native Rust ecosystem means less glue code, fewer workarounds, and more raw speed.
 
-The takeaway? Arrow Flight is only as good as the implementation behind it. And when it comes to sheer performance, LetSQL's Rust-powered engine makes all the difference.
+Rust isn't just faster. It eliminates entire classes of inefficiencies. Go's garbage collection can cause unpredictable latency, while LetSQL's Rust engine optimizes every step: from zero-copy memory handling to native DataFusion integration. The result? Raw speed with no compromises.
 
 ## The Solution: Experimentation That Paid Off
 
@@ -130,7 +130,7 @@ Custom Flight Exchanger (MyStreamingExchanger) → Allows inline transformations
 - Supports batch & streaming queries → No need to choose between ETL and real-time.
 Instead of pulling & processing data in bulk, we move it at the speed of memory.
 
-## The Results (Hold On Tight) 🚀
+## The Results (Hold On to Your Butt) :t-rex:
 
 ⚡ 240M+ Rows/Sec Streaming Throughput
 
@@ -139,7 +139,7 @@ Instead of pulling & processing data in bulk, we move it at the speed of memory.
   - Sent: 24M records in 0.10 sec (236M rows/sec)
   - Received: 24M records in 0.40 sec (59M rows/sec)
 
-⚡ Compared to Traditional Methods
+### ⚡ Compared to Traditional Methods
 
 | Method | Performance | Why It's Slower |
 |--------|-------------|-----------------|
@@ -150,7 +150,63 @@ Instead of pulling & processing data in bulk, we move it at the speed of memory.
 
 > We're no longer talking about incremental performance gains. This is a paradigm shift in how we move data.
 
-## The Future: Where This Pattern Is Going
+## The Code
+
+The code is available on GitHub but imagine if Flight servers, clients, and exchangers were this simple:
+
+### 1️⃣ Spin up a Flight Server
+
+```python
+from letsql.server import FlightServer
+
+server = FlightServer(
+    name="flights",
+    do_get=True,
+    do_exchange=True,
+)
+
+server.start()
+```
+
+No manual Arrow IPC wiring.
+No complicated schema definitions.
+Just declare what you need, and LetSQL handles the rest.
+
+### 2️⃣ Connect a Flight Client
+
+```python
+from letsql.client import FlightClient
+
+client = FlightClient(
+    name="flights",
+    port=8815,
+)
+```
+
+A single object that abstracts Flight tickets, descriptors, and connections—instead of forcing you to manage them manually.
+
+### 3️⃣ Define a Custom Flight Exchanger
+
+```python
+    from letsql.exchanger import MyStreamingExchanger
+
+    exchanger = MyStreamingExchanger()
+```
+
+Instead of manually reading Arrow RecordBatches, transforming data, and writing results,
+this would let you plug in a streaming transformer like a first-class citizen.
+
+## ⚡ Where LetSQL is Today
+
+This isn't how LetSQL works yet—but it could be.
+
+Right now, setting up Flight Servers, Clients, and Exchangers requires some boilerplate.
+
+Wouldn't it be better if LetSQL exposed a declarative, easy-to-use API like this?
+
+LetSQL already does the hard work and the team at LetSQL is actively working on it.
+
+## The Future: A Fully Declarative LetSQL
 
 Instead of manually defining Flight servers, what if you could declare them like this?
 
