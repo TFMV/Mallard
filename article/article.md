@@ -200,7 +200,7 @@ this would let you plug in a streaming transformer like a first-class citizen.
 
 LetSQL is powerful, but setting up Flight Servers, Clients, and Exchangers still requires some boilerplate.
 
-It doesn’t have to.
+It doesn't have to.
 
 Imagine a world where defining a Flight server is as simple as declaring a function. Where clients and exchangers are first-class citizens—plug-and-play, no friction, no clutter.
 
@@ -249,3 +249,16 @@ This wasn't just an experiment. This is a preview of what's coming next in data 
 - Flight-based architectures could replace traditional batch ETL in many cases.
 
 > This was fun to build, and I'm excited to see where LetSQL and the broader data community take this next.
+
+Tom McGeehan is a high-performance data engineering specialist who has spent years exploring the bleeding edge of Arrow, Flight, and modern streaming architectures. His work focuses on making large-scale data movement faster, more efficient, and more intuitive. He writes about performance, systems engineering, and the future of real-time ETL.
+
+---
+
+## About the Author
+
+I'm a performance-obsessed engineer who loves pushing data systems to their limits. With experience scaling enterprise data pipelines at 66degrees and a passion for high-performance architectures, I'm currently exploring new opportunities where I can tackle challenging data engineering problems.
+
+- 🚀 Specialized in high-performance data systems
+- 💡 Deep expertise in Arrow Flight, DuckDB, and streaming architectures
+- 🛠 Built systems handling massive-scale data migrations
+- 📫 Open to interesting opportunities: [LinkedIn/GitHub links]
