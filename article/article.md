@@ -157,7 +157,7 @@ The code is available on [GitHub](https://github.com/TFMV/letsql-demo) but imagi
 ### 1️⃣ Spin up a Flight Server
 
 ```python
-from letsql.server import FlightServer
+from letsql.flight.server import FlightServer
 
 server = FlightServer(
     name="flights",
@@ -175,7 +175,7 @@ Just declare what you need, and LetSQL handles the rest.
 ### 2️⃣ Connect a Flight Client
 
 ```python
-from letsql.client import FlightClient
+from letsql.flight.client import FlightClient
 
 client = FlightClient(
     name="flights",
@@ -188,7 +188,7 @@ A single object that abstracts Flight tickets, descriptors, and connections—in
 ### 3️⃣ Define a Custom Flight Exchanger
 
 ```python
-    from letsql.exchanger import MyStreamingExchanger
+    from letsql.flight.exchanger import MyStreamingExchanger
 
     exchanger = MyStreamingExchanger()
 ```
@@ -256,9 +256,13 @@ Tom McGeehan is a high-performance data engineering specialist who has spent yea
 
 ## About the Author
 
-I'm a performance-obsessed engineer who loves pushing data systems to their limits. With experience scaling enterprise data pipelines at 66degrees and a passion for high-performance architectures, I'm currently exploring new opportunities where I can tackle challenging data engineering problems.
+I’m a performance-obsessed engineer who loves pushing data systems to their limits. With experience scaling enterprise data pipelines at 66degrees and a deep focus on high-performance architectures, I thrive on solving complex data engineering challenges.
 
-- 🚀 Specialized in high-performance data systems
-- 💡 Deep expertise in Arrow Flight, DuckDB, and streaming architectures
-- 🛠 Built systems handling massive-scale data migrations
-- 📫 Open to interesting opportunities: [LinkedIn/GitHub links]
+🚀 Specializing in ultra-fast data movement and streaming architectures
+💡 Deep expertise in Arrow Flight, DuckDB, and high-performance ETL
+🛠 Built large-scale migration systems handling billions of records
+📫 Open to challenging opportunities in streaming and performance-driven data systems
+
+---
+
+🔗 Connect on [LinkedIn](https://www.linkedin.com/in/tfmv/) | 🐙 [GitHub](https://github.com/TFMV)
