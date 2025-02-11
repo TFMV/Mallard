@@ -1,12 +1,12 @@
-# Breaking Data Speed Limits: LetSQL, Arrow Flight & DuckDB in Action (And What Comes Next)
+# Breaking Data Speed Limits: LetSQL Meets DuckDB and Arrow Flight
 
 ## TL;DR
 
-- 240M+ rows/sec streaming throughput
+- 240M+ rows/sec streaming throughput 🚀
 - LetSQL abstracts Flight + Arrow + DataFusion for insane performance
-- Rust-powered, but you don’t need to write Rust
-- Streaming-native data pipelines will change ETL forever
-- If you're moving large-scale data, you should pay attention to this pattern.
+- Rust-powered, but you don't need to write Rust
+- Streaming-native ETL is the future (batch is fading)
+- If you move large-scale data, this pattern changes everything.
 
 ## Introduction
 
@@ -14,19 +14,27 @@
 > Go is simple, but it is not easy.
 > Rust is… well, Rust is complicated.
 
-I started coding young. Not just hacking together scripts—but really caring about how things worked.
+I have been coding for over 30 years.
 
-I loved clean, performant code before I even knew what those words meant. It wasn’t about the language—it was about how efficiently I could make something run.
+I have met true masters of the craft, and I am not one of them.
 
-That mindset led me to Apache Arrow and Flight in Go—experimenting, testing, and pushing the limits of high-performance data streaming. Arrow-go is powerful, but as soon as you start working with Flight RPC, IPC streams, and real-time data exchange, you realize just how much heavy lifting happens behind the scenes.
+But I've always cared about clean, performant code. Long before I even had the words for it. It was never just about the language. It was about how efficiently I could make something run.
 
-The problem? I don’t know a lick of Rust.
+That obsession with performance led me to Apache Arrow and Flight in Go—where raw speed comes at the cost of brutal complexity. Every optimization was a battle: tuning batch sizes, wrestling with memory management, squeezing microseconds from data transfers.
+
+Arrow-go is powerful, but it demands respect. The moment you dive into Flight RPC and IPC streams, the gloves come off. You're no longer working with friendly abstractions—you’re grappling with the machinery itself. It’s not about writing clever code. It’s about making every decision count, because every decision has a cost.
+
+And if you want to hit those mythical performance numbers?
+You don’t just code.
+You engineer.
+
+The problem? I don't know a lick of Rust.
 
 LetSQL does.
 
 LetSQL features a Rust-powered engine that brings together Arrow, DataFusion, and Flight, making advanced data streaming approachable. It abstracts away low-level complexity while enabling streaming-native data exchange at breakneck speeds.
 
-And it’s fast.
+And it's fast.
 
 Really fast.
 
@@ -52,7 +60,7 @@ I built a LetSQL demo in 9 hours.
 
 It achieved 240M rows/sec of streaming throughput.
 
-This wasn’t just some random experiment—I wanted to see what was possible with Arrow Flight and a Rust-powered data movement engine.
+This wasn't just some random experiment—I wanted to see what was possible with Arrow Flight and a Rust-powered data movement engine.
 
 ### 🏗 Architecture
 
@@ -78,7 +86,7 @@ Two DuckDB instances act as Flight servers.
 Streaming data between them in real-time (leveraging Arrow Flight).
 Custom Flight Exchanger (MyStreamingExchanger) → Allows inline transformations while streaming.
 
-### What’s Inside
+### What's Inside
 
 - LetSQL Flight Server → Built-in Flight server implementation.
 - MyStreamingExchanger → Custom Flight exchanger for inline transformations.
@@ -109,7 +117,7 @@ Instead of pulling & processing data in bulk, we move it at the speed of memory.
 | Arrow Flight GET | 50-60M rows/sec | Pull-based, but no inline transforms |
 | Flight Exchange (LetSQL) | 240M+ rows/sec 🚀 | True streaming, inline processing |
 
-> We’re no longer talking about incremental performance gains. This is a paradigm shift in how we move data.
+> We're no longer talking about incremental performance gains. This is a paradigm shift in how we move data.
 
 ## The Future: Where This Pattern Is Going
 
@@ -145,10 +153,10 @@ Hussain Sultan (LetSQL) hinted at the future:
 
 ## Final Thoughts: Why This Matters
 
-This wasn’t just an experiment—this is a preview of what’s coming next in data engineering.
+This wasn't just an experiment—this is a preview of what's coming next in data engineering.
 
 - LetSQL, Arrow Flight, and DuckDB are unlocking streaming-native data pipelines.
-- 240M+ rows/sec isn’t theoretical—it’s achievable today.
+- 240M+ rows/sec isn't theoretical—it's achievable today.
 - Flight-based architectures could replace traditional batch ETL in many cases.
 
-> This was fun to build, and I’m excited to see where LetSQL and the broader data community take this next.
+> This was fun to build, and I'm excited to see where LetSQL and the broader data community take this next.
