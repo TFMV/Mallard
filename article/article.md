@@ -14,18 +14,18 @@
 > Go is simple, but it is not easy.
 > Rust is… well, Rust is complicated.
 
-I have been coding for over 30 years.
+I have been coding for over 30 years. I started young (really young), so don't go picturing me as a relic just yet.
 
 I have met true masters of the craft, and I am not one of them.
 
-But I've always cared about clean, performant code. Long before I even had the words for it. It was never just about the language. It was about how efficiently I could make something run.
+But I loved clean, performant code before I even knew what those words meant. It wasn't about the language;it was about how efficiently I could make something run.
 
-That obsession with performance led me to Apache Arrow and Flight in Go—where raw speed comes at the cost of brutal complexity. Every optimization was a battle: tuning batch sizes, wrestling with memory management, squeezing microseconds from data transfers.
+That obsession with performance led me to Apache Arrow and Flight in Go, where raw speed comes at the cost of brutal complexity. Every optimization was a battle: tuning batch sizes, managing Arrow memory pools, minimizing allocations, and squeezing microseconds from data transfers.
 
-Arrow-go is powerful, but it demands respect. The moment you dive into Flight RPC and IPC streams, the gloves come off. You're no longer working with friendly abstractions—you’re grappling with the machinery itself. It’s not about writing clever code. It’s about making every decision count, because every decision has a cost.
+Arrow-go is powerful, but it demands respect. The moment you dive into Flight RPC and IPC streams, the gloves come off. You're no longer working with friendly abstractions—you're grappling with the machinery itself. It's not about writing clever code. It's about making every decision count, because every decision has a cost.
 
 And if you want to hit those mythical performance numbers?
-You don’t just code.
+You don't just code.
 You engineer.
 
 The problem? I don't know a lick of Rust.
@@ -38,21 +38,52 @@ And it's fast.
 
 Really fast.
 
+## The Pain That Started It All
+
+Before I was deep in Arrow Flight and high-performance data streaming, I was stuck wrangling an enterprise ETL tool called Striim.
+
+The job? Migrating thousands of databases from on-prem SQL Server to the cloud, all while keeping systems online. That meant Change Data Capture (CDC) for real-time updates and an initial full load of historical data.
+
+The CDC part was fine—it trickled updates efficiently.
+
+The initial load? A complete disaster.
+
+Striim was brutally inefficient for bulk inserts. It fired off singleton inserts at scale, turning what should have been a fast data movement process into a bottleneck-laden grind.
+
+We often had to fracture the "initial load" into half a dozen separate Striim applications just to keep things moving. Even then, it crawled, choking the databases and bringing everything to a standstill.
+
+It wasn't just slow; it was the wrong model for the problem.
+
+That frustration pushed me toward Apache Arrow, Flight, and streaming-native architectures—where moving large-scale data wasn't just fast, it was designed to be fast from the ground up.
+
 ## The Problem: Why Data Movement Is Still Hard
 
-- Flight RPC is powerful, but complex
-- Apache Arrow Flight is designed for high-performance data exchange, but using it efficiently still requires:
-  - Optimizing batch sizes for throughput
-  - Streaming efficiently to avoid bottlenecks
-  - Handling schema evolution & serialization overhead
-- ETL vs. Streaming: The Performance Bottleneck
-  - Traditional ETL moves data in bulk, not streams → inefficient for real-time workloads.
-A lot of modern architectures are still batch-first → streaming-native solutions aren't as widely adopted.
-- Arrow-go vs. Rust-based solutions
-  - Arrow-go is great, but Rust-based solutions (like LetSQL) are often better optimized for:
-    - Memory safety (Rust's ownership model)
-    - Multi-threading & concurrency (LetSQL taps into DataFusion's parallel query engine)
-    - Better integration with DataFusion (native Rust ecosystem)
+I've spent years chasing raw speed—pushing data faster, cutting inefficiencies, and wringing every last cycle out of a system. That obsession led me to Apache Arrow and Flight RPC in Go.
+
+On paper, Arrow Flight is a dream: zero-copy columnar data, lightning-fast IPC, and an RPC layer built for streaming massive datasets. But theory and reality rarely align.
+
+Using Flight efficiently isn't just about turning it on; it's about mastering the hidden complexities:
+
+- Batching & Throughput – Get batch sizes wrong, and you'll throttle performance before the system even warms up.
+- Streaming vs. Bottlenecks – One bad decision can turn streaming into a bottleneck, negating Flight's advantages.
+- Schema Evolution & Serialization Overhead – Real-world data isn't neat, and simply dumping Arrow tables into Flight won't cut it.
+I spent days profiling Flight RPC calls in Go, hunting microseconds, chasing optimizations that worked—mostly. But the real issue wasn't Go's Arrow implementation.
+
+The difference was deeper.
+
+- Memory Management – Rust's ownership model lets LetSQL squeeze out raw efficiency in ways Go can't.
+- Concurrency & Multi-threading – LetSQL taps directly into DataFusion's parallel query engine, tackling workloads Go struggles with.
+- Seamless DataFusion Integration – A native Rust ecosystem means less glue code, fewer workarounds, and more raw speed.
+
+LetSQL didn't just make Arrow Flight faster; it made it practical.
+
+### Why arrow-go Struggles Against Rust
+
+- Memory Management: Rust's ownership model gives LetSQL an edge in raw efficiency.
+- Concurrency & Multi-threading: LetSQL taps directly into DataFusion's parallel query engine, handling workloads Go struggles with.
+- Seamless Integration with DataFusion: A native Rust ecosystem means less glue code, fewer workarounds, and more raw speed.
+
+The takeaway? Arrow Flight is only as good as the implementation behind it. And when it comes to sheer performance, LetSQL's Rust-powered engine makes all the difference.
 
 ## The Solution: Experimentation That Paid Off
 
@@ -60,7 +91,7 @@ I built a LetSQL demo in 9 hours.
 
 It achieved 240M rows/sec of streaming throughput.
 
-This wasn't just some random experiment—I wanted to see what was possible with Arrow Flight and a Rust-powered data movement engine.
+This wasn't just some random experiment. I wanted to see what was possible with Arrow Flight and a Rust-powered data movement engine.
 
 ### 🏗 Architecture
 
@@ -153,7 +184,7 @@ Hussain Sultan (LetSQL) hinted at the future:
 
 ## Final Thoughts: Why This Matters
 
-This wasn't just an experiment—this is a preview of what's coming next in data engineering.
+This wasn't just an experiment. This is a preview of what's coming next in data engineering.
 
 - LetSQL, Arrow Flight, and DuckDB are unlocking streaming-native data pipelines.
 - 240M+ rows/sec isn't theoretical—it's achievable today.
