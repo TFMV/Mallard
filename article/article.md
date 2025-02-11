@@ -258,10 +258,10 @@ Tom McGeehan is a high-performance data engineering specialist who has spent yea
 
 I’m a performance-obsessed engineer who loves pushing data systems to their limits. With experience scaling enterprise data pipelines at 66degrees and a deep focus on high-performance architectures, I thrive on solving complex data engineering challenges.
 
-🚀 Specializing in ultra-fast data movement and streaming architectures
-💡 Deep expertise in Arrow Flight, DuckDB, and high-performance ETL
-🛠 Built large-scale migration systems handling billions of records
-📫 Open to challenging opportunities in streaming and performance-driven data systems
+- 🚀 Specializing in ultra-fast data movement and streaming architectures
+- 💡 Deep expertise in Arrow Flight, DuckDB, and high-performance ETL
+- 🛠 Built large-scale migration systems handling billions of records
+- 📫 Open to challenging opportunities in streaming and performance-driven data systems
 
 ---
 
