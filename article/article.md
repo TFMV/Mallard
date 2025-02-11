@@ -159,13 +159,11 @@ The code is available on [GitHub](https://github.com/TFMV/letsql-demo) but imagi
 ```python
 from letsql.flight.server import FlightServer
 
-server = FlightServer(
-    name="flights",
-    do_get=True,
-    do_exchange=True,
-)
+@flight_ops(do_get=True, do_exchange=True)
+def my_expr():
+    return duckdb.sql("SELECT * FROM flights")
 
-server.start()
+expr.into_flight(name="flights")  # Instantly starts a Flight server
 ```
 
 No manual Arrow IPC wiring.
@@ -177,10 +175,7 @@ Just declare what you need, and LetSQL handles the rest.
 ```python
 from letsql.flight.client import FlightClient
 
-client = FlightClient(
-    name="flights",
-    port=8815,
-)
+client = FlightClient(name="flights", port=8815)
 ```
 
 A single object that abstracts Flight tickets, descriptors, and connections—instead of forcing you to manage them manually.
@@ -188,9 +183,9 @@ A single object that abstracts Flight tickets, descriptors, and connections—in
 ### 3️⃣ Define a Custom Flight Exchanger
 
 ```python
-    from letsql.flight.exchanger import MyStreamingExchanger
+from letsql.flight.exchanger import MyStreamingExchanger
 
-    exchanger = MyStreamingExchanger()
+exchanger = MyStreamingExchanger()
 ```
 
 Instead of manually reading Arrow RecordBatches, transforming data, and writing results,
@@ -219,8 +214,6 @@ def my_expr():
 
 expr.into_flight(name="flights")  # Automatically spins up Flight server
 ```
-
-This keeps @flight_ops focused on defining Flight capabilities, while into_flight() actually spins up the server.
 
 ---
 
@@ -256,13 +249,13 @@ Tom McGeehan is a high-performance data engineering specialist who has spent yea
 
 ## About the Author
 
-I’m a performance-obsessed engineer who loves pushing data systems to their limits. With experience scaling enterprise data pipelines at 66degrees and a deep focus on high-performance architectures, I thrive on solving complex data engineering challenges.
+I build high-performance data systems that move massive datasets at blazing speeds. With deep expertise in Go, Python, SQL, Arrow, Flight, DuckDB, and streaming architectures, I focus on designing scalable, efficient solutions that push the limits of what's possible.
 
-- 🚀 Specializing in ultra-fast data movement and streaming architectures
-- 💡 Deep expertise in Arrow Flight, DuckDB, and high-performance ETL
-- 🛠 Built large-scale migration systems handling billions of records
-- 📫 Open to challenging opportunities in streaming and performance-driven data systems
+- 🚀 Specialized in ultra-fast data movement & real-time streaming
+- 💡 Deep expertise in Apache Arrow, Flight, and high-performance ETL
+- 🛠 Architected large-scale migration systems handling billions of records
+- 📫 Sharing insights on performance, data engineering, and modern architectures
 
 ---
 
-🔗 Connect on [LinkedIn](https://www.linkedin.com/in/tfmv/) | 🐙 [GitHub](https://github.com/TFMV)
+🔗 Find me on [LinkedIn](https://www.linkedin.com/in/tfmv/) | 🐙 [GitHub](https://github.com/TFMV)
