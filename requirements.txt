@@ -5,5 +5,5 @@ pandas
 protobuf
 grpcio
 grpcio-tools
-letsql[all]
 cloudpickle
+watchdog

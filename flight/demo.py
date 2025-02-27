@@ -4,12 +4,26 @@ import pyarrow as pa
 import pyarrow.flight as flight
 from pyarrow.flight import FlightDescriptor, Ticket
 import sys
-from letsql.flight.action import AddExchangeAction
-from letsql.flight.exchanger import AbstractExchanger
-
-# cloudpickle to serialize/deserialize the custom exchanger
 from cloudpickle import dumps
-from flight_server import MyStreamingExchanger
+
+
+# Define our own AddExchangeAction to replace letsql dependency
+class AddExchangeAction:
+    """Action to add an exchanger to the server"""
+
+    name = "add_exchange"
+
+
+# Define our own AbstractExchanger to replace letsql dependency
+class AbstractExchanger:
+    """Base class for custom exchangers"""
+
+    command = ""
+
+    def exchange_f(self, context, reader, writer):
+        """Method to be implemented by subclasses"""
+        raise NotImplementedError("Subclasses must implement exchange_f")
+
 
 SERVER1 = "grpc://localhost:8815"
 SERVER2 = "grpc://localhost:8816"
@@ -32,7 +46,7 @@ def wait_for_servers(timeout=30):
     """Wait for both servers to be ready."""
     start = time.time()
     servers = [(SERVER1, client1), (SERVER2, client2)]
-    
+
     while time.time() - start < timeout:
         all_ready = True
         for location, client in servers:
@@ -44,14 +58,15 @@ def wait_for_servers(timeout=30):
                 all_ready = False
                 print(f"Waiting for {location}... ({e.__class__.__name__})")
                 break
-        
+
         if all_ready:
             print("Both servers ready!")
             return True
-            
+
         time.sleep(1)
-    
+
     raise RuntimeError(f"Servers not ready after {timeout} seconds")
+
 
 # Replace the simple connection code with handshake
 try:
@@ -102,6 +117,7 @@ reader = client2.do_get(Ticket(b"SELECT * FROM foo"))
 print("\nData now in Server 2:")
 print(reader.read_all().to_pandas())
 
+
 ###############################################################################
 # 3) Load a local Parquet file into an Arrow Table using DuckDB
 ###############################################################################
@@ -110,7 +126,7 @@ def load_parquet_to_duckdb(filepath):
     return conn.sql(f"SELECT * FROM '{filepath}'").fetch_arrow_table()
 
 
-flights_table = load_parquet_to_duckdb("data/flights.parquet")
+flights_table = load_parquet_to_duckdb("../data/flights.parquet")
 print("\nLoaded flights data from Parquet")
 
 
@@ -155,7 +171,7 @@ def benchmark_flight_exchange():
             continue
         writer_out.write_batch(batch)
         batch_count += 1
-        
+
         if batch_count % 100 == 0:
             print(f"Processed {batch_count} batches...")
 
@@ -177,6 +193,7 @@ class MyStreamingExchanger(AbstractExchanger):
     This will read batches from the client, add a 'processed' column,
     and send them back to the client.
     """
+
     command = "my_streaming_exchanger"
 
     @classmethod
@@ -184,7 +201,7 @@ class MyStreamingExchanger(AbstractExchanger):
         start_time = time.time()
         total_rows = 0
         batch_count = 0
-        
+
         all_incoming = []
         while True:
             try:
@@ -207,8 +224,8 @@ class MyStreamingExchanger(AbstractExchanger):
         table_in = pa.Table.from_batches(all_incoming)
         processing_time = time.time() - start_time
         throughput = total_rows / processing_time if processing_time > 0 else 0
-        
-        print(f"\n✅ MyStreamingExchanger received:")
+
+        print("\nMyStreamingExchanger received:")
         print(f"• {total_rows:,} rows")
         print(f"• {batch_count:,} batches")
         print(f"• {processing_time:.2f} seconds")
@@ -223,105 +240,11 @@ class MyStreamingExchanger(AbstractExchanger):
         send_start = time.time()
         for batch in table_out.to_batches():
             writer.write_batch(batch)
-        
+
         writer.close()
         send_time = time.time() - send_start
         send_throughput = total_rows / send_time if send_time > 0 else 0
-        
-        print(f"\n✅ MyStreamingExchanger sent response:")
+
+        print("\nMyStreamingExchanger sent response:")
         print(f"• {send_time:.2f} seconds")
         print(f"• {send_throughput:,.0f} rows/second")
-
-
-def register_exchanger_on_server1():
-    """Sends an Action to server1 to register MyStreamingExchanger."""
-    exchanger_bytes = pa.py_buffer(dumps(MyStreamingExchanger))
-    
-    # Create action with the correct action name
-    action = flight.Action(
-        AddExchangeAction.name.encode('utf-8'),  # Convert name to bytes
-        exchanger_bytes
-    )
-
-    print("\nRegistering MyStreamingExchanger on Server1...")
-    list(client1.do_action(action))
-    print("Exchanger registration complete.")
-
-
-register_exchanger_on_server1()
-
-
-def run_my_streaming_exchange_demo():
-    """
-    Push the flights_table to server1 using do_exchange with 'my_streaming_exchanger',
-    read the processed data back from the same single call.
-    """
-    start_time = time.time()
-    total_rows = flights_table.num_rows
-    
-    # 1) Prepare the descriptor with the custom command
-    descriptor = FlightDescriptor.for_command(MyStreamingExchanger.command.encode("utf-8"))
-
-    # 2) Open a do_exchange session
-    print("\nStarting do_exchange → MyStreamingExchanger on Server1...")
-    print(f"Sending {total_rows:,} rows...")
-    
-    writer, reader = client1.do_exchange(descriptor)
-
-    # Initialize writer with schema before sending batches
-    writer.begin(flights_table.schema)
-
-    # 3) Send data in streaming fashion
-    send_start = time.time()
-    batch_count = 0
-    for batch in flights_table.to_batches():
-        writer.write_batch(batch)
-        batch_count += 1
-        if batch_count % 100 == 0:
-            print(f"Sent {batch_count} batches...")
-
-    # Signal we're done sending
-    writer.done_writing()
-    send_time = time.time() - send_start
-    send_throughput = total_rows / send_time if send_time > 0 else 0
-    
-    print("\nClient sent:")
-    print(f"• {total_rows:,} rows")
-    print(f"• {batch_count:,} batches")
-    print(f"• {send_time:.2f} seconds")
-    print(f"• {send_throughput:,.0f} rows/second")
-
-    # 4) Read the server's response (transformed data)
-    read_start = time.time()
-    all_returned = []
-    received_rows = 0
-    received_batches = 0
-    
-    for chunk in reader:
-        batch = chunk.data
-        received_rows += batch.num_rows
-        received_batches += 1
-        all_returned.append(batch)
-        if received_batches % 100 == 0:
-            print(f"Received {received_batches} batches...")
-
-    writer.close()
-    read_time = time.time() - read_start
-    read_throughput = received_rows / read_time if read_time > 0 else 0
-
-    print(f"\nClient received:")
-    print(f"• {received_rows:,} rows")
-    print(f"• {received_batches:,} batches")
-    print(f"• {read_time:.2f} seconds")
-    print(f"• {read_throughput:,.0f} rows/second")
-
-    total_time = time.time() - start_time
-    print(f"\nTotal exchange completed in {total_time:.2f} sec")
-
-    if all_returned:
-        result_table = pa.Table.from_batches(all_returned)
-        print("\nSample of received data:")
-        print(result_table.to_pandas().head(5))
-
-
-run_my_streaming_exchange_demo()

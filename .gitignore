@@ -182,3 +182,5 @@ obsolete/
 *.db
 *.wal
 *.lfs
+*.parquet
+.DS_Store
