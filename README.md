@@ -12,40 +12,53 @@ Mallard demonstrates high-performance data streaming between DuckDB instances us
 - **High Performance**: Optimized for throughput with batch processing
 - **Flexible Data Operations**: Support for queries, data insertion, and bidirectional streaming
 
-## Benchmarks
+## 🔧 Known Issues and Troubleshooting
 
-| Metric     | Value        | Throughput              |
-| ---------- | ------------ | ----------------------- |
-| GET time   | 0.07 seconds | 351,309,939 rows/second |
-| PUT time   | 0.78 seconds | 30,584,318 rows/second  |
-| Total time | 0.85 seconds | 28,134,837 rows/second  |
+### Arrow Alignment Warnings
 
-## 📂 Project Structure
+You may see warnings like this in the server terminal:
 
-```bash
-├── data/                 # Data files
-│   └── flights.parquet   # Example dataset for testing
-├── flight/               # Core flight components
-│   ├── flight_server.py  # DuckDB Flight servers with auth & custom protocols
-│   └── demo.py           # Client demonstrating data exchange & benchmarking
-└── README.md             # This documentation
+```
+An input buffer was poorly aligned. This could lead to crashes or poor performance on some hardware.
 ```
 
-### flight_server
+These warnings come from Apache Arrow's Acero execution engine and indicate memory alignment issues. While they don't prevent the application from working, they may impact performance.
 
-- Launches two DuckDB-based Flight servers
-- Implements basic authentication with username/password
-- Supports `do_get`, `do_put`, and `do_exchange` operations
-- Enables dynamic exchanger registration
-- Provides graceful shutdown handling
+**Solutions:**
 
-### demo
+1. **Configure Arrow to ignore alignment issues** (recommended):
 
-- Connects to both servers
-- Demonstrates table creation and transfer
-- Loads and transfers Parquet data
-- Implements custom streaming logic
-- Benchmarks performance
+   Add this code at the beginning of your scripts:
+
+   ```python
+   import pyarrow as pa
+   pa.set_option("compute.allow_unaligned_buffers", True)
+   ```
+
+2. **Ensure proper memory alignment** when creating Arrow arrays:
+
+   ```python
+   # Use pandas as an intermediary for better alignment
+   import pandas as pd
+   df = pd.DataFrame(your_data)
+   table = pa.Table.from_pandas(df)
+   ```
+
+3. **Suppress the warnings** if they're just noise:
+
+   ```python
+   import warnings
+   warnings.filterwarnings("ignore", message="An input buffer was poorly aligned")
+   ```
+
+## Benchmarks
+
+| Metric        | Value        | Throughput             |
+| ------------- | ------------ | ---------------------- |
+| GET time      | 0.32 seconds | 74,077,045 rows/second |
+| Transfer time | 0.44 seconds | 44,816,067 rows/second |
+| Exchange time | 0.53 seconds | 45,692,884 rows/second |
+| Total rows    | 24,000,000   |                        |
 
 ## 🏗 Architecture
 
@@ -90,6 +103,32 @@ python flight/flight_server.py
 ```bash
 python flight/demo.py
 ```
+
+## 🔧 Configuration Options
+
+The server supports several command line options for customization:
+
+```bash
+# Run with default in-memory databases (same as no arguments)
+python flight/flight_server.py --server1-db ":memory:" --server2-db ":memory:"
+
+# Run with persistent database files
+python flight/flight_server.py --server1-db "data/server1.db" --server2-db "data/server2.db"
+
+# Change server locations
+python flight/flight_server.py --server1-location "grpc://localhost:9000" --server2-location "grpc://localhost:9001"
+
+# Enable authentication
+python flight/flight_server.py --auth
+```
+
+All available options:
+
+- `--server1-location`: URL for server 1 (default: grpc://localhost:8815)
+- `--server2-location`: URL for server 2 (default: grpc://localhost:8816)
+- `--server1-db`: Database path for server 1 (default: :memory:)
+- `--server2-db`: Database path for server 2 (default: :memory:)
+- `--auth`: Enable authentication
 
 ## 📖 Demo Walkthrough
 

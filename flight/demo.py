@@ -1,38 +1,285 @@
 import time
+import logging
+import os
+import signal
+import sys
+from typing import Dict, List, Optional, Tuple, Any
+
 import duckdb
 import pyarrow as pa
 import pyarrow.flight as flight
 from pyarrow.flight import FlightDescriptor, Ticket
-import sys
 from cloudpickle import dumps
-import os
-import signal
+
+# Import exchanger base classes from server module
+from flight_server import AbstractExchanger, AddExchangeAction
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler()],
+)
+logger = logging.getLogger("mallard.demo")
 
 
-# Define our own AddExchangeAction to replace letsql dependency
-class AddExchangeAction:
-    """Action to add an exchanger to the server"""
+# ================================================================================
+# Configuration
+# ================================================================================
+class ClientConfig:
+    """Configuration for Flight client."""
 
-    name = "add_exchange"
+    def __init__(self, location: str, name: str):
+        self.location = location
+        self.name = name
 
-
-# Define our own AbstractExchanger to replace letsql dependency
-class AbstractExchanger:
-    """Base class for custom exchangers"""
-
-    command = ""
-
-    def exchange_f(self, context, reader, writer):
-        """Method to be implemented by subclasses"""
-        raise NotImplementedError("Subclasses must implement exchange_f")
+    def __str__(self) -> str:
+        return f"ClientConfig(name={self.name}, location={self.location})"
 
 
-# Custom exchanger for benchmarking
+# Default client configurations
+SERVER1_CONFIG = ClientConfig(location="grpc://localhost:8815", name="server1")
+SERVER2_CONFIG = ClientConfig(location="grpc://localhost:8816", name="server2")
+
+
+# ================================================================================
+# Client Connection Management
+# ================================================================================
+class FlightClientManager:
+    """
+    Manages Flight client connections.
+    Follows Single Responsibility Principle by focusing only on client connections.
+    """
+
+    def __init__(self, configs: Optional[List[ClientConfig]] = None):
+        """Initialize with client configurations."""
+        self.configs = configs or [SERVER1_CONFIG, SERVER2_CONFIG]
+        self.clients = {}
+        self._connect_all()
+
+    def _connect_all(self):
+        """Connect to all configured servers."""
+        for config in self.configs:
+            try:
+                self.clients[config.name] = self._connect(config)
+                logger.info(f"Connected to {config.name} at {config.location}")
+            except Exception as e:
+                logger.error(f"Failed to connect to {config.name}: {e}")
+                raise
+
+    def _connect(self, config: ClientConfig) -> flight.FlightClient:
+        """Connect to a single server."""
+        return flight.connect(config.location)
+
+    def get_client(self, name: str) -> flight.FlightClient:
+        """Get a client by name."""
+        if name not in self.clients:
+            raise ValueError(f"Unknown client: {name}")
+        return self.clients[name]
+
+    def close_all(self):
+        """Close all client connections."""
+        for name, client in self.clients.items():
+            try:
+                client.close()
+                logger.info(f"Closed connection to {name}")
+            except Exception as e:
+                logger.error(f"Error closing connection to {name}: {e}")
+
+        self.clients.clear()
+
+
+# ================================================================================
+# Data Operations
+# ================================================================================
+class DataOperations:
+    """
+    Data operations using Flight clients.
+    Follows Single Responsibility Principle by focusing on data operations.
+    """
+
+    def __init__(self, client_manager: FlightClientManager):
+        """Initialize with a client manager."""
+        self.client_manager = client_manager
+
+    def execute_query(self, server_name: str, query: str) -> pa.Table:
+        """Execute a query on a server."""
+        client = self.client_manager.get_client(server_name)
+        reader = client.do_get(Ticket(query.encode("utf-8")))
+        return reader.read_all()
+
+    def create_table(self, server_name: str, table_name: str, data: pa.Table):
+        """Create a table on a server."""
+        client = self.client_manager.get_client(server_name)
+        descriptor = FlightDescriptor.for_command(table_name.encode())
+        writer, _ = client.do_put(descriptor, data.schema)
+
+        for batch in data.to_batches():
+            writer.write_batch(batch)
+
+        writer.close()
+        logger.info(
+            f"Created table {table_name} on {server_name} with {data.num_rows} rows"
+        )
+
+    def register_exchanger(self, server_name: str, exchanger_class):
+        """Register an exchanger on a server."""
+        client = self.client_manager.get_client(server_name)
+
+        # Serialize the exchanger class
+        serialized_exchanger = dumps(exchanger_class)
+
+        # Create and send the action
+        action = flight.Action(AddExchangeAction.name, serialized_exchanger)
+        result = list(client.do_action(action))
+
+        logger.info(f"Registered exchanger {exchanger_class.__name__} on {server_name}")
+        return result
+
+    def transfer_table(
+        self, from_server: str, to_server: str, table_name: str
+    ) -> Tuple[int, float]:
+        """Transfer a table from one server to another."""
+        # Get the data from the source server
+        source_client = self.client_manager.get_client(from_server)
+        reader = source_client.do_get(Ticket(f"SELECT * FROM {table_name}".encode()))
+        schema = reader.schema
+
+        # Send the data to the destination server
+        dest_client = self.client_manager.get_client(to_server)
+        descriptor = FlightDescriptor.for_command(table_name.encode())
+        writer, _ = dest_client.do_put(descriptor, schema)
+
+        # Track stats
+        start_time = time.time()
+        total_rows = 0
+        batch_count = 0
+
+        # Transfer the data
+        for chunk in reader:
+            batch = chunk.data
+            if batch.num_rows == 0:
+                continue
+
+            writer.write_batch(batch)
+            batch_count += 1
+            total_rows += batch.num_rows
+
+        writer.close()
+        duration = time.time() - start_time
+
+        logger.info(
+            f"Transferred {total_rows} rows in {batch_count} batches in {duration:.2f} seconds"
+        )
+        return total_rows, duration
+
+    def exchange_data(self, server_name: str, command: str, data: pa.Table) -> pa.Table:
+        """Exchange data with a server using a custom exchanger."""
+        client = self.client_manager.get_client(server_name)
+        descriptor = FlightDescriptor.for_command(command.encode())
+
+        # Create a writer to send data to the server
+        writer, reader = client.do_exchange(descriptor)
+
+        # Track stats
+        batch_count = 0
+        total_rows = 0
+
+        # Begin writing with the schema
+        writer.begin(data.schema)
+
+        # Send the data
+        for batch in data.to_batches():
+            writer.write_batch(batch)
+            batch_count += 1
+            total_rows += batch.num_rows
+
+        writer.close()
+
+        # Receive the processed data back
+        result_batches = []
+        for chunk in reader:
+            result_batches.append(chunk.data)
+
+        # Combine into one table
+        if result_batches:
+            result_table = pa.Table.from_batches(result_batches)
+            logger.info(f"Exchanged {total_rows} rows in {batch_count} batches")
+            logger.info(f"Received {result_table.num_rows} rows back")
+            return result_table
+        else:
+            logger.warning("No data received from exchange")
+            return pa.table({})
+
+
+# ================================================================================
+# Data Generation
+# ================================================================================
+class DataGenerator:
+    """
+    Generate sample data for testing.
+    Follows Single Responsibility Principle by focusing on data generation.
+    """
+
+    @staticmethod
+    def create_sample_table() -> pa.Table:
+        """Create a small sample table."""
+        data = {
+            "id": [1, 2, 3, 4, 5],
+            "name": ["Alice", "Bob", "Charlie", "Dave", "Eve"],
+            "value": [10.5, 20.0, 15.5, 30.0, 25.5],
+        }
+        return pa.Table.from_pydict(data)
+
+    @staticmethod
+    def create_flights_table(rows: int = 10000) -> pa.Table:
+        """Create a flights table with the specified number of rows."""
+        # Create the data
+        data = {
+            "flight_id": list(range(1, rows + 1)),
+            "flight_number": [f"Flight-{i}" for i in range(1, rows + 1)],
+            "origin": ["JFK", "LAX", "ORD", "DFW", "SFO"] * (rows // 5 + 1),
+            "destination": ["SFO", "JFK", "LAX", "ORD", "DFW"] * (rows // 5 + 1),
+            "departure_time": [
+                f"2023-{(i % 12) + 1:02d}-{(i % 28) + 1:02d} {(i % 24):02d}:00:00"
+                for i in range(rows)
+            ],
+            "passengers": [50 + i % 200 for i in range(rows)],
+        }
+
+        return pa.Table.from_pydict(data)
+
+    @staticmethod
+    def load_or_create_parquet(filepath: str, rows: int = 10000) -> pa.Table:
+        """Load a parquet file or create it if it doesn't exist."""
+        if os.path.exists(filepath):
+            logger.info(f"Loading existing data from {filepath}")
+            conn = duckdb.connect()
+            return conn.sql(f"SELECT * FROM '{filepath}'").fetch_arrow_table()
+
+        # Create the directory if it doesn't exist
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+
+        # Create a new dataset
+        logger.info(f"Creating new dataset with {rows} rows")
+        flights_table = DataGenerator.create_flights_table(rows)
+
+        # Save to parquet
+        conn = duckdb.connect()
+        conn.register("flights_temp", flights_table)
+        conn.execute(f"COPY flights_temp TO '{filepath}' (FORMAT PARQUET)")
+
+        logger.info(f"Saved dataset to {filepath}")
+        return flights_table
+
+
+# ================================================================================
+# Custom Exchangers
+# ================================================================================
 class MyStreamingExchanger(AbstractExchanger):
     """
-    A minimal example that shows how to do a custom streaming exchange.
-    This will read batches from the client, add a 'processed' column,
-    and send them back to the client.
+    A custom exchanger that adds a 'processed' column.
+    Follows Single Responsibility Principle by focusing on one transformation.
     """
 
     command = "my_streaming_exchanger"
@@ -43,306 +290,328 @@ class MyStreamingExchanger(AbstractExchanger):
         total_rows = 0
         batch_count = 0
 
-        print("MyStreamingExchanger starting to process data")
+        logger.info("Processing data in MyStreamingExchanger")
 
+        # Collect all incoming data
         all_incoming = []
         while True:
             try:
                 chunk = reader.read_chunk()
+                if chunk.data.num_rows == 0:
+                    break
+                all_incoming.append(chunk.data)
+                total_rows += chunk.data.num_rows
+                batch_count += 1
             except StopIteration:
                 break
-            if chunk.data.num_rows == 0:
-                break
-            all_incoming.append(chunk.data)
-            total_rows += chunk.data.num_rows
-            batch_count += 1
 
         if not all_incoming:
-            print("No data received in exchanger")
-            empty_table = pa.table({})
-            writer.begin(empty_table.schema)
+            logger.info("No data received in exchanger")
+            writer.begin(pa.schema([]))
             writer.close()
             return
 
         # Combine into one Arrow table
         table_in = pa.Table.from_batches(all_incoming)
-        processing_time = time.time() - start_time
-        throughput = total_rows / processing_time if processing_time > 0 else 0
 
-        print("\nMyStreamingExchanger received:")
-        print(f"• {total_rows:,} rows")
-        print(f"• {batch_count:,} batches")
-        print(f"• {processing_time:.2f} seconds")
-        print(f"• {throughput:,.0f} rows/second")
-
-        # Example: add a boolean column
+        # Add the processed column
         processed_col = pa.array([True] * table_in.num_rows, pa.bool_())
         table_out = table_in.append_column("processed", processed_col)
 
-        # Stream back
+        # Stream the result back
         writer.begin(table_out.schema)
-        send_start = time.time()
         for batch in table_out.to_batches():
             writer.write_batch(batch)
 
         writer.close()
-        send_time = time.time() - send_start
-        send_throughput = total_rows / send_time if send_time > 0 else 0
+        duration = time.time() - start_time
 
-        print("\nMyStreamingExchanger sent response:")
-        print(f"• {send_time:.2f} seconds")
-        print(f"• {send_throughput:,.0f} rows/second")
+        logger.info(f"Processed {total_rows} rows in {duration:.2f} seconds")
 
 
-SERVER1 = "grpc://localhost:8815"
-SERVER2 = "grpc://localhost:8816"
+# ================================================================================
+# Benchmark Operations
+# ================================================================================
+class Benchmarker:
+    """
+    Benchmark various data operations.
+    Follows Single Responsibility Principle by focusing on benchmarking.
+    """
 
-# Connect to both servers
-client1 = flight.connect(SERVER1)
-client2 = flight.connect(SERVER2)
+    def __init__(self, data_ops: DataOperations):
+        """Initialize with a data operations instance."""
+        self.data_ops = data_ops
+
+    def benchmark_get(self, server_name: str, query: str) -> Dict[str, Any]:
+        """Benchmark a GET operation."""
+        logger.info(f"Benchmarking GET on {server_name}: {query}")
+
+        start_time = time.time()
+        result = self.data_ops.execute_query(server_name, query)
+        duration = time.time() - start_time
+
+        metrics = {
+            "rows": result.num_rows,
+            "duration": duration,
+            "throughput": result.num_rows / duration if duration > 0 else 0,
+        }
+
+        logger.info(f"GET: {metrics['rows']} rows in {metrics['duration']:.2f} seconds")
+        logger.info(f"Throughput: {metrics['throughput']:.0f} rows/second")
+
+        return metrics
+
+    def benchmark_transfer(
+        self, from_server: str, to_server: str, table_name: str
+    ) -> Dict[str, Any]:
+        """Benchmark a data transfer between servers."""
+        logger.info(f"Benchmarking transfer {from_server} → {to_server}: {table_name}")
+
+        start_time = time.time()
+        rows, transfer_time = self.data_ops.transfer_table(
+            from_server, to_server, table_name
+        )
+        total_time = time.time() - start_time
+
+        # Verify the transfer
+        dest_rows = (
+            self.data_ops.execute_query(to_server, f"SELECT COUNT(*) FROM {table_name}")
+            .to_pandas()
+            .iloc[0, 0]
+        )
+
+        metrics = {
+            "rows": rows,
+            "transfer_time": transfer_time,
+            "total_time": total_time,
+            "throughput": rows / total_time if total_time > 0 else 0,
+            "verified_rows": dest_rows,
+        }
+
+        logger.info(
+            f"Transfer: {metrics['rows']} rows in {metrics['total_time']:.2f} seconds"
+        )
+        logger.info(f"Throughput: {metrics['throughput']:.0f} rows/second")
+
+        return metrics
+
+    def benchmark_exchange(
+        self, server_name: str, command: str, data: pa.Table
+    ) -> Dict[str, Any]:
+        """Benchmark a custom exchange operation."""
+        logger.info(f"Benchmarking exchange on {server_name}: {command}")
+
+        start_time = time.time()
+        result = self.data_ops.exchange_data(server_name, command, data)
+        duration = time.time() - start_time
+
+        metrics = {
+            "input_rows": data.num_rows,
+            "output_rows": result.num_rows,
+            "duration": duration,
+            "throughput": data.num_rows / duration if duration > 0 else 0,
+        }
+
+        # Verify the processed column
+        has_processed = "processed" in result.column_names
+        all_processed = False
+        if has_processed:
+            all_processed = all(result.column("processed").to_pylist())
+
+        metrics["has_processed_column"] = has_processed
+        metrics["all_processed"] = all_processed
+
+        logger.info(
+            f"Exchange: {metrics['input_rows']} rows in {metrics['duration']:.2f} seconds"
+        )
+        logger.info(f"Throughput: {metrics['throughput']:.0f} rows/second")
+        logger.info(f"Processed column: {has_processed}, All True: {all_processed}")
+
+        return metrics
 
 
-###############################################################################
-# 1) Quick verification of the Flight connections
-###############################################################################
-def verify_flight_connection():
-    query = "SELECT 42 AS answer"
-    reader = client2.do_get(Ticket(query.encode("utf-8")))
-    print("\nConnection Verified:\n", reader.read_all())
+# ================================================================================
+# Demo Runner
+# ================================================================================
+class DemoRunner:
+    """
+    Runs a complete demonstration of Flight capabilities.
+    Follows Single Responsibility Principle by focusing on orchestration.
+    """
 
+    def __init__(self):
+        """Initialize the demo."""
+        self.client_manager = FlightClientManager()
+        self.data_ops = DataOperations(self.client_manager)
+        self.benchmarker = Benchmarker(self.data_ops)
 
-def wait_for_servers(timeout=30):
-    """Wait for both servers to be ready."""
-    start = time.time()
-    servers = [(SERVER1, client1), (SERVER2, client2)]
+        # Register signal handlers for clean shutdown
+        signal.signal(signal.SIGINT, self._handle_interrupt)
+        signal.signal(signal.SIGTERM, self._handle_interrupt)
 
-    while time.time() - start < timeout:
-        all_ready = True
-        for location, client in servers:
+    def _handle_interrupt(self, signum, frame):
+        """Handle interrupt signals."""
+        logger.info("Interrupt received, shutting down...")
+        self.cleanup()
+        sys.exit(0)
+
+    def setup(self):
+        """Set up the demo environment."""
+        logger.info("Setting up demo environment...")
+
+        # Wait for servers
+        self._wait_for_servers()
+
+        # Create sample data
+        self._setup_sample_data()
+
+        # Register custom exchanger
+        self._register_custom_exchanger()
+
+    def _wait_for_servers(self, max_attempts: int = 30):
+        """Wait for servers to be ready."""
+        logger.info("Waiting for servers to be ready...")
+
+        for attempt in range(max_attempts):
             try:
-                # Try a simple query to check if server is responsive
-                reader = client.do_get(Ticket(b"SELECT 1"))
-                reader.read_all()
+                # Try a simple query to verify connection
+                for server in ["server1", "server2"]:
+                    result = self.data_ops.execute_query(server, "SELECT 1")
+                    if result.num_rows != 1:
+                        raise ValueError(f"Unexpected result from {server}")
+
+                logger.info("All servers are ready")
+                return True
             except Exception as e:
-                all_ready = False
-                print(f"Waiting for {location}... ({e.__class__.__name__})")
-                break
+                logger.warning(
+                    f"Servers not ready yet (attempt {attempt+1}/{max_attempts}): {e}"
+                )
+                time.sleep(1)
 
-        if all_ready:
-            print("Both servers ready!")
+        raise RuntimeError(f"Servers not ready after {max_attempts} attempts")
+
+    def _setup_sample_data(self):
+        """Set up sample data for the demo."""
+        # Create a simple table on server1
+        simple_table = DataGenerator.create_sample_table()
+        self.data_ops.create_table("server1", "simple_table", simple_table)
+
+        # Load or create flights data
+        data_dir = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "data"
+        )
+        parquet_path = os.path.join(data_dir, "flights.parquet")
+        self.flights_table = DataGenerator.load_or_create_parquet(parquet_path)
+
+        # Create flights table on server1
+        self.data_ops.create_table("server1", "flights", self.flights_table)
+
+    def _register_custom_exchanger(self):
+        """Register the custom exchanger."""
+        logger.info("Registering custom exchanger...")
+        try:
+            self.data_ops.register_exchanger("server1", MyStreamingExchanger)
+            logger.info("Custom exchanger registered successfully")
+        except Exception as e:
+            logger.error(f"Failed to register custom exchanger: {e}")
+
+    def run_simple_demo(self):
+        """Run a simple demonstration."""
+        logger.info("\n" + "=" * 80)
+        logger.info("SIMPLE DEMONSTRATION")
+        logger.info("=" * 80)
+
+        # Query the simple table
+        result = self.data_ops.execute_query("server1", "SELECT * FROM simple_table")
+        logger.info(f"Simple table contents:\n{result.to_pandas()}")
+
+        # Transfer the table to server2
+        self.data_ops.transfer_table("server1", "server2", "simple_table")
+
+        # Verify the transfer
+        result = self.data_ops.execute_query("server2", "SELECT * FROM simple_table")
+        logger.info(f"Table transferred to server2:\n{result.to_pandas()}")
+
+    def run_benchmarks(self):
+        """Run benchmarks."""
+        logger.info("\n" + "=" * 80)
+        logger.info("RUNNING BENCHMARKS")
+        logger.info("=" * 80)
+
+        # Benchmark GET
+        logger.info("\n--- Benchmark GET ---")
+        get_metrics = self.benchmarker.benchmark_get("server1", "SELECT * FROM flights")
+
+        # Benchmark Transfer
+        logger.info("\n--- Benchmark Transfer ---")
+        transfer_metrics = self.benchmarker.benchmark_transfer(
+            "server1", "server2", "flights"
+        )
+
+        # Benchmark Custom Exchange
+        logger.info("\n--- Benchmark Custom Exchange ---")
+        exchange_metrics = self.benchmarker.benchmark_exchange(
+            "server1", "my_streaming_exchanger", self.flights_table
+        )
+
+        # Print summary
+        logger.info("\n" + "=" * 80)
+        logger.info("BENCHMARK SUMMARY")
+        logger.info("=" * 80)
+
+        logger.info(f"\nTotal rows: {self.flights_table.num_rows:,}")
+        logger.info(
+            f"GET time: {get_metrics['duration']:.2f} seconds ({get_metrics['throughput']:,.0f} rows/second)"
+        )
+        logger.info(
+            f"Transfer time: {transfer_metrics['transfer_time']:.2f} seconds ({transfer_metrics['throughput']:,.0f} rows/second)"
+        )
+        logger.info(
+            f"Exchange time: {exchange_metrics['duration']:.2f} seconds ({exchange_metrics['throughput']:,.0f} rows/second)"
+        )
+
+    def cleanup(self):
+        """Clean up resources."""
+        logger.info("Cleaning up resources...")
+        self.client_manager.close_all()
+
+    def run(self):
+        """Run the complete demo."""
+        try:
+            self.setup()
+            self.run_simple_demo()
+            self.run_benchmarks()
+            logger.info("\nDemo completed successfully!")
             return True
+        except Exception as e:
+            logger.error(f"Demo failed: {e}")
+            import traceback
 
-        time.sleep(1)
-
-    raise RuntimeError(f"Servers not ready after {timeout} seconds")
-
-
-# Replace the simple connection code with handshake
-try:
-    wait_for_servers()
-except Exception as e:
-    print(f"Failed to connect to servers: {e}")
-    sys.exit(1)
+            traceback.print_exc()
+            return False
+        finally:
+            self.cleanup()
 
 
-###############################################################################
-# 2) Simple example: create & move a small table "foo" from Server1 → Server2
-###############################################################################
-def setup_table():
-    query = """
-    CREATE TABLE IF NOT EXISTS foo (id INTEGER, name VARCHAR);
-    INSERT INTO foo VALUES (1, 'test'), (2, 'example');
-    """
-    client1.do_get(Ticket(query.encode("utf-8")))
-
-
-setup_table()
-
-
-def fetch_data_from_server1():
-    reader = client1.do_get(Ticket(b"SELECT * FROM foo"))
-    return reader.read_all()
-
-
-data = fetch_data_from_server1()
-print("\nData from Server 1:")
-print(data.to_pandas())
-
-
-def move_data_to_server2():
-    descriptor = FlightDescriptor.for_command(b"foo")
-    writer, _ = client2.do_put(descriptor, data.schema)
-
-    for batch in data.to_batches():
-        writer.write_batch(batch)
-
-    writer.close()
-    print("\nData moved to Server 2.")
-
-
-move_data_to_server2()
-
-reader = client2.do_get(Ticket(b"SELECT * FROM foo"))
-print("\nData now in Server 2:")
-print(reader.read_all().to_pandas())
-
-
-###############################################################################
-# 3) Load a local Parquet file into an Arrow Table using DuckDB
-###############################################################################
-def load_parquet_to_duckdb(filepath):
-    conn = duckdb.connect()
-    return conn.sql(f"SELECT * FROM '{filepath}'").fetch_arrow_table()
-
-
-# Check if the file exists, if not, create a small sample dataset
-data_dir = "../data"
-parquet_file = os.path.join(data_dir, "flights.parquet")
-
-if not os.path.exists(parquet_file):
-    print(f"\nSample data file not found at {parquet_file}")
-    print("Creating a small sample dataset...")
-
-    # Ensure the data directory exists
-    os.makedirs(data_dir, exist_ok=True)
-
-    # Create a small sample dataset
-    conn = duckdb.connect()
-    conn.execute(
-        """
-        CREATE TABLE flights AS 
-        SELECT 
-            RANGE AS flight_id,
-            CONCAT('Flight-', CAST(RANGE AS VARCHAR)) AS flight_number,
-            CASE WHEN RANGE % 3 = 0 THEN 'JFK' 
-                 WHEN RANGE % 3 = 1 THEN 'LAX' 
-                 ELSE 'ORD' END AS origin,
-            CASE WHEN RANGE % 5 = 0 THEN 'SFO' 
-                 WHEN RANGE % 5 = 1 THEN 'DFW' 
-                 WHEN RANGE % 5 = 2 THEN 'MIA'
-                 WHEN RANGE % 5 = 3 THEN 'SEA'
-                 ELSE 'BOS' END AS destination,
-            TIMESTAMP '2023-01-01 00:00:00' + INTERVAL (RANGE % 365) DAY + INTERVAL (RANGE % 24) HOUR AS departure_time,
-            100 + RANGE % 900 AS passengers
-        FROM RANGE(0, 10000)
-    """
-    )
-    conn.execute(f"COPY flights TO '{parquet_file}' (FORMAT PARQUET)")
-    print(f"Created sample dataset with 10,000 rows at {parquet_file}")
-
-flights_table = load_parquet_to_duckdb(parquet_file)
-print(f"\nLoaded flights data from Parquet: {flights_table.num_rows:,} rows")
-
-
-###############################################################################
-# 4) Send the flights data to Server1, confirm it's there
-###############################################################################
-def send_flights_to_server1():
-    start_time = time.time()
-    descriptor = FlightDescriptor.for_command(b"flights")
-    writer, _ = client1.do_put(descriptor, flights_table.schema)
-
-    batch_count = 0
-    total_rows = 0
-    for batch in flights_table.to_batches():
-        writer.write_batch(batch)
-        batch_count += 1
-        total_rows += batch.num_rows
-
-    writer.close()
-    duration = time.time() - start_time
-    throughput = total_rows / duration if duration > 0 else 0
-
-    print("\nFlights data sent to Server 1:")
-    print(f"• {total_rows:,} rows")
-    print(f"• {batch_count:,} batches")
-    print(f"• {duration:.2f} seconds")
-    print(f"• {throughput:,.0f} rows/second")
-
-
-send_flights_to_server1()
-
-# Verify data on Server 1
-reader = client1.do_get(Ticket(b"SELECT COUNT(*) FROM flights"))
-count_table = reader.read_all()
-print(f"\nFlights data on Server 1: {count_table.to_pandas().iloc[0, 0]:,} rows")
-
-
-###############################################################################
-# 5) Benchmark a do_get/do_put style flight exchange (Server1 → Server2)
-###############################################################################
-def benchmark_flight_exchange():
-    print("\n" + "=" * 80)
-    print("BENCHMARKING SERVER1 → SERVER2 DATA TRANSFER")
-    print("=" * 80)
-
-    start_time = time.time()
-    batch_count = 0
-    total_rows = 0
-
-    # Pull data from Server1
-    get_start = time.time()
-    reader = client1.do_get(Ticket(b"SELECT * FROM flights"))
-    schema = reader.schema
-    get_time = time.time() - get_start
-
-    # Push data to Server2
-    put_start = time.time()
-    descriptor_out = FlightDescriptor.for_command(b"flights")
-    writer_out, _ = client2.do_put(descriptor_out, schema)
-
-    for chunk in reader:
-        batch = chunk.data
-        if batch.num_rows == 0:
-            continue
-        writer_out.write_batch(batch)
-        batch_count += 1
-        total_rows += batch.num_rows
-
-        if batch_count % 100 == 0:
-            print(f"Processed {batch_count} batches...")
-
-    writer_out.close()
-    put_time = time.time() - put_start
-    total_time = time.time() - start_time
-
-    # Calculate metrics
-    get_throughput = total_rows / get_time if get_time > 0 else 0
-    put_throughput = total_rows / put_time if put_time > 0 else 0
-    total_throughput = total_rows / total_time if total_time > 0 else 0
-
-    print("\nBenchmark Results:")
-    print(f"• Total rows: {total_rows:,}")
-    print(f"• Total batches: {batch_count:,}")
-    print(f"• GET time: {get_time:.2f} seconds ({get_throughput:,.0f} rows/second)")
-    print(f"• PUT time: {put_time:.2f} seconds ({put_throughput:,.0f} rows/second)")
-    print(
-        f"• Total time: {total_time:.2f} seconds ({total_throughput:,.0f} rows/second)"
-    )
-
-    # Verify data on Server 2
-    reader = client2.do_get(Ticket(b"SELECT COUNT(*) FROM flights"))
-    count_table = reader.read_all()
-    print(f"\nFlights data on Server 2: {count_table.to_pandas().iloc[0, 0]:,} rows")
-
-
-benchmark_flight_exchange()
-
-
-# Register a signal handler for graceful shutdown
-def handle_shutdown(signum, frame):
-    print("\nShutting down client...")
+# ================================================================================
+# Main Entry Point
+# ================================================================================
+def main():
+    """Main entry point for the demo."""
     try:
-        client1.close()
-        client2.close()
+        demo = DemoRunner()
+        success = demo.run()
+        sys.exit(0 if success else 1)
+    except KeyboardInterrupt:
+        logger.info("\nDemo interrupted by user")
+        sys.exit(1)
     except Exception as e:
-        print(f"Error during client shutdown: {e}")
-    print("Client shutdown complete.")
-    sys.exit(0)
+        logger.error(f"Unhandled exception: {e}")
+        import traceback
+
+        traceback.print_exc()
+        sys.exit(1)
 
 
-# Register signal handlers
-signal.signal(signal.SIGINT, handle_shutdown)
-signal.signal(signal.SIGTERM, handle_shutdown)
-
-print("\nDemo completed successfully!")
+if __name__ == "__main__":
+    main()
