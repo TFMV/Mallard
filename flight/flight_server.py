@@ -5,13 +5,12 @@ import duckdb
 import pyarrow as pa
 import pyarrow.flight as flight
 from cloudpickle import loads
-from letsql.flight.action import AddExchangeAction
-from letsql.flight.exchanger import AbstractExchanger
 from threading import Thread, Event
 import signal
 import sys
 import threading
 import os
+import time
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -23,32 +22,86 @@ SERVER_CONFIGS = [
     {"db_path": "duckwings2.db", "location": "grpc://localhost:8816"},
 ]
 
+
+# Custom implementation to replace letsql.flight.exchanger.AbstractExchanger
+class AbstractExchanger:
+    """Base class for custom exchangers"""
+
+    command = ""
+
+    def exchange_f(self, context, reader, writer):
+        """Method to be implemented by subclasses"""
+        raise NotImplementedError("Subclasses must implement exchange_f")
+
+
+# Custom implementation to replace letsql.flight.action.AddExchangeAction
+class AddExchangeAction:
+    """Action to add an exchanger to the server"""
+
+    name = "add_exchange"
+
+
 class MyStreamingExchanger(AbstractExchanger):
+    """
+    A minimal example that shows how to do a custom streaming exchange.
+    This will read batches from the client, add a 'processed' column,
+    and send them back to the client.
+    """
+
     command = "my_streaming_exchanger"
 
     def exchange_f(self, context, reader, writer):
-        # Process incoming data
-        incoming_batches = []
-        for chunk in reader:
-            incoming_batches.append(chunk)
+        start_time = import_time = time.time()
+        total_rows = 0
+        batch_count = 0
 
-        # Echo the data back
-        if incoming_batches:
-            writer.begin(incoming_batches[0].schema)
-            for batch in incoming_batches:
-                writer.write_batch(batch)
+        all_incoming = []
+        while True:
+            try:
+                chunk = reader.read_chunk()
+            except StopIteration:
+                break
+            if chunk.data.num_rows == 0:
+                break
+            all_incoming.append(chunk.data)
+            total_rows += chunk.data.num_rows
+            batch_count += 1
+
+        if not all_incoming:
+            empty_table = pa.table({})
+            writer.begin(empty_table.schema)
+            writer.close()
+            return
+
+        # Combine into one Arrow table
+        table_in = pa.Table.from_batches(all_incoming)
+        processing_time = time.time() - start_time
+        throughput = total_rows / processing_time if processing_time > 0 else 0
+
+        logger.info("\nMyStreamingExchanger received:")
+        logger.info(f"• {total_rows:,} rows")
+        logger.info(f"• {batch_count:,} batches")
+        logger.info(f"• {processing_time:.2f} seconds")
+        logger.info(f"• {throughput:,.0f} rows/second")
+
+        # Example: add a boolean column
+        processed_col = pa.array([True] * table_in.num_rows, pa.bool_())
+        table_out = table_in.append_column("processed", processed_col)
+
+        # Stream back
+        writer.begin(table_out.schema)
+        send_start = time.time()
+        for batch in table_out.to_batches():
+            writer.write_batch(batch)
+
         writer.close()
+        send_time = time.time() - send_start
+        send_throughput = total_rows / send_time if send_time > 0 else 0
 
+        logger.info("\nMyStreamingExchanger sent response:")
+        logger.info(f"• {send_time:.2f} seconds")
+        logger.info(f"• {send_throughput:,.0f} rows/second")
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("DuckWings")
-
-# Default configurations
-SERVER_CONFIGS = [
-    {"db_path": "duckwings1.db", "location": "grpc://localhost:8815"},
-    {"db_path": "duckwings2.db", "location": "grpc://localhost:8816"},
-]
 
 # Shutdown event to signal all servers to stop
 shutdown_event = Event()
@@ -114,7 +167,7 @@ class DuckDBFlightServer(flight.FlightServerBase):
         super().__init__(location)
         self.db_path = os.path.abspath(db_path)
         os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
-        
+
         # Initialize DuckDB
         self.conn = duckdb.connect(self.db_path, read_only=False)
         self.location = location
@@ -123,7 +176,7 @@ class DuckDBFlightServer(flight.FlightServerBase):
         }
         self._running = True
         self.exchangers = {}
-        
+
         # Add health check query to verify DB is ready
         try:
             self.conn.execute("SELECT 1")
@@ -145,7 +198,7 @@ class DuckDBFlightServer(flight.FlightServerBase):
         """Runs the server until the shutdown event is set."""
         if not self.health_check():
             raise RuntimeError(f"Server at {self.location} failed health check")
-            
+
         logger.info(f"Server started at {self.location}. Press Ctrl+C to stop.")
         try:
             self.serve()
@@ -207,13 +260,15 @@ class DuckDBFlightServer(flight.FlightServerBase):
 
             # Register the Arrow table and create/insert in one step
             self.conn.register(f"temp_{table_name}", table)
-            self.conn.execute(f"""
+            self.conn.execute(
+                f"""
                 CREATE TABLE IF NOT EXISTS {table_name} AS 
                 SELECT * FROM temp_{table_name} WHERE 1=0;
                 
                 INSERT INTO {table_name} 
                 SELECT * FROM temp_{table_name};
-            """)
+            """
+            )
             self.conn.unregister(f"temp_{table_name}")  # Clean up temporary table
 
             logger.info("Inserted %d rows into %s", table.num_rows, table_name)

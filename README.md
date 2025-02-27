@@ -56,7 +56,7 @@ By integrating letsql, the system supports high-performance, real-time data stre
    │   port 8815   │         │   port 8816   │
    └───────┬───────┘         └───────┬───────┘
            │                         │
-           │ (gRPC/Arrow Flight)     │
+           │  (gRPC/Arrow Flight)    │
            │                         │
       ┌────▼─-───────────────────────▼─────┐
       │        demo.py (Flight Client)     │
