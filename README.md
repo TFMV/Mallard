@@ -1,45 +1,37 @@
-# letsql-demo
+# Mallard
 
-## High-Performance Data Exchange
+## High-Performance Data Exchange with Arrow Flight and DuckDB
 
-This repository demonstrates how to use the [letsql](https://www.letsql.com/) library to exchange data between DuckDB instances using Arrow Flight, showcasing high-performance streaming data transfer and custom exchange protocols.
-
-## Usage of letsql in the Project
-
-The letsql solution enables custom Flight actions and exchangers, allowing the server to support dynamic streaming queries and efficiently handle large-scale data transfers. It is used to:
-
-- Import Key Classes: AddExchangeAction and AbstractExchanger provide the foundation for defining and handling custom data exchange mechanisms.
-- Define a Custom Exchanger: MyStreamingExchanger, inheriting from AbstractExchanger, processes incoming data in a streaming fashion and returns transformed results.
-- Handle Custom Actions: The do_action method in DuckDBFlightServer dynamically registers exchangers using AddExchangeAction, enabling runtime flexibility.
-
-By integrating letsql, the system supports high-performance, real-time data streaming.
+Mallard demonstrates high-performance data streaming between DuckDB instances using Apache Arrow Flight, showcasing efficient data transfer and custom exchange protocols.
 
 ## ✨ Features
 
-- **Two DuckDB Flight Servers**: Each listening on a unique gRPC endpoint
-- **Basic Authentication**: Username/password + token-based session management
+- **Dual DuckDB Flight Servers**: Two independent servers each listening on a unique gRPC endpoint
+- **Basic Authentication**: Username/password authentication with token-based session management
 - **Custom Exchangers**: Advanced streaming with inline transformations
-- **High Performance**: 240M+ rows/second throughput in testing
-- **Large Dataset Support**: Successfully tested with 200M+ row datasets
+- **High Performance**: Optimized for throughput with batch processing
+- **Flexible Data Operations**: Support for queries, data insertion, and bidirectional streaming
 
-## 📂 Repository Structure
+## 📂 Project Structure
 
 ```bash
-├── _data/                # Data files
+├── data/                 # Data files
 │   └── flights.parquet   # Example dataset for testing
-├── flight_server.py      # DuckDB Flight servers with auth & custom protocols
-├── demo.py               # Client demonstrating data exchange & benchmarking
+├── flight/               # Core flight components
+│   ├── flight_server.py  # DuckDB Flight servers with auth & custom protocols
+│   └── demo.py           # Client demonstrating data exchange & benchmarking
 └── README.md             # This documentation
 ```
 
-### flight_server.py
+### flight_server
 
 - Launches two DuckDB-based Flight servers
-- Implements basic authentication
-- Supports `do_get`, `do_put`, and `do_exchange`
+- Implements basic authentication with username/password
+- Supports `do_get`, `do_put`, and `do_exchange` operations
 - Enables dynamic exchanger registration
+- Provides graceful shutdown handling
 
-### demo.py
+### demo
 
 - Connects to both servers
 - Demonstrates table creation and transfer
@@ -49,9 +41,9 @@ By integrating letsql, the system supports high-performance, real-time data stre
 
 ## 🏗 Architecture
 
-```scss
+```
    ┌───────────────┐         ┌───────────────┐
-   │ letsql_server │         │  letsql_server│
+   │    Mallard    │         │    Mallard    │
    │  (DuckDB #1)  │  <----> │  (DuckDB #2)  │
    │   port 8815   │         │   port 8816   │
    └───────┬───────┘         └───────┬───────┘
@@ -69,6 +61,9 @@ By integrating letsql, the system supports high-performance, real-time data stre
 
 - Python 3.8+
 - Required packages:
+  - pyarrow
+  - duckdb
+  - cloudpickle
 
 ```bash
 pip install -r requirements.txt
@@ -79,13 +74,13 @@ pip install -r requirements.txt
 1. Start the servers:
 
 ```bash
-python flight_server.py
+python flight/flight_server.py
 ```
 
 2. Run the demo:
 
 ```bash
-python demo.py
+python flight/demo.py
 ```
 
 ## 📖 Demo Walkthrough
@@ -93,7 +88,8 @@ python demo.py
 The demo script performs these operations:
 
 1. **Connection Verification**
-   - Runs `SELECT 42` to confirm server connectivity
+   - Waits for servers to be ready
+   - Runs a simple query to confirm connectivity
 
 2. **Basic Table Operations**
    - Creates and populates table `foo` on Server1
@@ -105,19 +101,9 @@ The demo script performs these operations:
    - Benchmarks transfer to Server2
 
 4. **Custom Exchange Demo**
-   - Registers `MyStreamingExchanger` on Server1
-   - Demonstrates bidirectional streaming
+   - Uses `MyStreamingExchanger` for bidirectional streaming
    - Adds a `processed` column during exchange
-
-## 📊 Performance
-
-Recent benchmarks show:
-
-- Send throughput: ~240M rows/second
-- Receive throughput: ~60M rows/second
-- Successfully tested with 200M+ row datasets
-
-*Note: Actual performance depends on hardware, network, and dataset characteristics.*
+   - Measures performance metrics
 
 ## 🔒 Security
 
@@ -125,11 +111,7 @@ Authentication is implemented via:
 
 - Default credentials: `admin:password123`
 - Token-based session management
-- Secure credential handling
-
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
+- Basic auth middleware
 
 ## 📝 License
 

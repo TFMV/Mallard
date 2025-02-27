@@ -14,12 +14,12 @@ import time
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("DuckWings")
+logger = logging.getLogger("Mallard")
 
 # Default configurations
 SERVER_CONFIGS = [
-    {"db_path": "duckwings1.db", "location": "grpc://localhost:8815"},
-    {"db_path": "duckwings2.db", "location": "grpc://localhost:8816"},
+    {"db_path": "mallard1.db", "location": "grpc://localhost:8815"},
+    {"db_path": "mallard2.db", "location": "grpc://localhost:8816"},
 ]
 
 
