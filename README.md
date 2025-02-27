@@ -12,6 +12,14 @@ Mallard demonstrates high-performance data streaming between DuckDB instances us
 - **High Performance**: Optimized for throughput with batch processing
 - **Flexible Data Operations**: Support for queries, data insertion, and bidirectional streaming
 
+## Benchmarks
+
+| Metric     | Value        | Throughput              |
+| ---------- | ------------ | ----------------------- |
+| GET time   | 0.07 seconds | 351,309,939 rows/second |
+| PUT time   | 0.78 seconds | 30,584,318 rows/second  |
+| Total time | 0.85 seconds | 28,134,837 rows/second  |
+
 ## 📂 Project Structure
 
 ```bash
