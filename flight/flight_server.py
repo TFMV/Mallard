@@ -8,7 +8,6 @@ from cloudpickle import loads
 from threading import Thread, Event
 import signal
 import sys
-import threading
 import os
 import time
 
@@ -18,8 +17,8 @@ logger = logging.getLogger("Mallard")
 
 # Default configurations
 SERVER_CONFIGS = [
-    {"db_path": "mallard1.db", "location": "grpc://localhost:8815"},
-    {"db_path": "mallard2.db", "location": "grpc://localhost:8816"},
+    {"db_path": ":memory:", "location": "grpc://localhost:8815"},
+    {"db_path": ":memory:", "location": "grpc://localhost:8816"},
 ]
 
 
@@ -51,9 +50,12 @@ class MyStreamingExchanger(AbstractExchanger):
     command = "my_streaming_exchanger"
 
     def exchange_f(self, context, reader, writer):
-        start_time = import_time = time.time()
+        """Process incoming data and add a 'processed' column."""
+        start_time = time.time()
         total_rows = 0
         batch_count = 0
+
+        logger.info("MyStreamingExchanger starting to process data")
 
         all_incoming = []
         while True:
@@ -68,6 +70,7 @@ class MyStreamingExchanger(AbstractExchanger):
             batch_count += 1
 
         if not all_incoming:
+            logger.info("No data received in exchanger")
             empty_table = pa.table({})
             writer.begin(empty_table.schema)
             writer.close()
@@ -176,6 +179,7 @@ class DuckDBFlightServer(flight.FlightServerBase):
         }
         self._running = True
         self.exchangers = {}
+        self._shutdown_requested = False
 
         # Add health check query to verify DB is ready
         try:
@@ -200,25 +204,72 @@ class DuckDBFlightServer(flight.FlightServerBase):
             raise RuntimeError(f"Server at {self.location} failed health check")
 
         logger.info(f"Server started at {self.location}. Press Ctrl+C to stop.")
+
+        # Start the server in a separate thread
+        server_thread = Thread(target=self._serve_thread, daemon=True)
+        server_thread.start()
+
+        try:
+            # Wait for shutdown event
+            while not shutdown_event.is_set() and self._running:
+                time.sleep(0.5)
+        except Exception as e:
+            if not shutdown_event.is_set():  # Only log if not due to shutdown
+                logger.error(f"Error in server {self.location}: {e}")
+        finally:
+            logger.info(f"Shutting down server at {self.location}")
+            self._shutdown_requested = True
+            self.shutdown()
+            # Close the database connection
+            if hasattr(self, "conn") and self.conn:
+                try:
+                    self.conn.close()
+                    logger.info(f"Closed database connection for {self.location}")
+                except Exception as e:
+                    logger.error(f"Error closing database connection: {e}")
+
+    def _serve_thread(self):
+        """Thread function to run the server."""
         try:
             self.serve()
         except Exception as e:
-            logger.error(f"Error in server {self.location}: {e}")
+            if not self._shutdown_requested:  # Only log if not due to shutdown
+                logger.error(f"Error in server thread {self.location}: {e}")
         finally:
-            logger.info(f"Shutting down server at {self.location}")
-            self.shutdown()
+            if not self._shutdown_requested:
+                logger.info(f"Server thread at {self.location} exited unexpectedly")
 
     def do_exchange(self, context, descriptor, reader, writer):
         """Handles streaming queries between DuckDB instances using Arrow Flight."""
         command = descriptor.command.decode("utf-8")
+        logger.info(f"Received exchange command: {command}")
 
+        # First check if this is a registered custom exchanger
         if command in self.exchangers:
-            logger.info(f"Executing exchanger: {command}")
+            logger.info(f"Executing custom exchanger: {command}")
             return self.exchangers[command].exchange_f(context, reader, writer)
 
+        # If not a custom exchanger, treat it as a SQL query
         else:
-            logger.info(f"Executing SQL query: {command}")
+            logger.info(f"Executing SQL query via exchange: {command}")
             try:
+                # Validate that this looks like a SQL query to avoid confusion
+                if not any(
+                    keyword in command.upper()
+                    for keyword in [
+                        "SELECT",
+                        "INSERT",
+                        "UPDATE",
+                        "DELETE",
+                        "CREATE",
+                        "DROP",
+                        "ALTER",
+                    ]
+                ):
+                    raise ValueError(
+                        f"Command '{command}' is not a recognized SQL query or custom exchanger"
+                    )
+
                 result_table = self.conn.sql(command).fetch_arrow_table()
 
                 writer.begin(result_table.schema)
@@ -284,18 +335,35 @@ class DuckDBFlightServer(flight.FlightServerBase):
             else:
                 action_type = action.type
 
+            logger.info(f"Received action: {action_type}")
+
             if action_type == AddExchangeAction.name:
                 exchange_cls = loads(action.body.to_pybytes())
                 if issubclass(exchange_cls, AbstractExchanger):
-                    self.exchangers[exchange_cls.command] = (
-                        exchange_cls()
-                    )  # Create instance
-                    logger.info(f"Registered exchange: {exchange_cls.command}")
+                    command = exchange_cls.command
+                    self.exchangers[command] = exchange_cls()  # Create instance
+                    logger.info(f"Registered exchange: {command}")
+                    logger.info(f"Current exchangers: {list(self.exchangers.keys())}")
                     return []
-            raise flight.FlightServerError(f"Unknown action: {action_type}")
+                else:
+                    logger.error(
+                        f"Received invalid exchanger class: {exchange_cls.__name__}"
+                    )
+                    raise flight.FlightServerError(
+                        f"Invalid exchanger class: {exchange_cls.__name__}"
+                    )
+            else:
+                raise flight.FlightServerError(f"Unknown action: {action_type}")
         except Exception as e:
             logger.exception(f"Error in do_action: {e}")
             raise
+
+    def shutdown(self):
+        """Properly shutdown the server and clean up resources."""
+        self._shutdown_requested = True
+        super().shutdown()
+        self._running = False
+        logger.info(f"Server at {self.location} has been shut down")
 
 
 def start_server(server_config):
@@ -305,45 +373,95 @@ def start_server(server_config):
     try:
         server.serve_with_shutdown()
     except Exception as e:
-        logger.error(f"Error in server {server.location}: {e}")
+        if not shutdown_event.is_set():  # Only log if not due to shutdown
+            logger.error(f"Error in server {server.location}: {e}")
+    finally:
+        # Ensure server is properly shut down even if an exception occurs
+        if server._running:
+            try:
+                server.shutdown()
+            except Exception as e:
+                logger.error(f"Error during server shutdown: {e}")
 
 
 def handle_shutdown(signum, frame):
     """Handles Ctrl+C to gracefully shut down all servers."""
-    logger.info("\nShutdown requested by user. Stopping all servers...")
+    logger.info("\nShutdown requested. Stopping all servers...")
     shutdown_event.set()
+
+    # Give servers a moment to notice the shutdown event
+    time.sleep(1.0)
 
     # Properly shut down each running server
     for server in running_servers:
-        logger.info(f"Shutting down server at {server.location}")
-        try:
-            server.shutdown()
-        except Exception as e:
-            logger.error(f"Error shutting down server at {server.location}: {e}")
-        finally:
-            logger.info(f"Server at {server.location} shut down successfully")
+        if hasattr(server, "_running") and server._running:
+            logger.info(f"Shutting down server at {server.location}")
+            try:
+                server._shutdown_requested = True
+                server.shutdown()
+            except Exception as e:
+                logger.error(f"Error shutting down server at {server.location}: {e}")
+
+    # Wait for all servers to finish shutting down (max 5 seconds)
+    shutdown_start = time.time()
+    while any(hasattr(s, "_running") and s._running for s in running_servers):
+        if time.time() - shutdown_start > 5:
+            logger.warning("Some servers did not shut down in time. Forcing exit.")
+            break
+        time.sleep(0.5)
 
 
 if __name__ == "__main__":
-    # Register signal handler for Ctrl+C
+    # Register signal handler for Ctrl+C and other termination signals
     signal.signal(signal.SIGINT, handle_shutdown)
     signal.signal(signal.SIGTERM, handle_shutdown)
-    signal.signal(signal.SIGABRT, handle_shutdown)
+
+    # Also handle SIGABRT if available on the platform
+    try:
+        signal.signal(signal.SIGABRT, handle_shutdown)
+    except AttributeError:
+        pass  # SIGABRT might not be available on all platforms
 
     try:
         # Start the servers
         threads = [
-            Thread(target=start_server, args=(config,)) for config in SERVER_CONFIGS
+            Thread(target=start_server, args=(config,), daemon=True)
+            for config in SERVER_CONFIGS
         ]
         for thread in threads:
             thread.start()
 
         logger.info("Press Ctrl+C to stop the servers.")
 
-        # Instead of a blocking join, join in a loop so that the main thread remains responsive.
-        for thread in threads:
-            while thread.is_alive():
-                thread.join(timeout=1)
+        # Wait for all threads to complete or until interrupted
+        while any(thread.is_alive() for thread in threads):
+            time.sleep(0.5)
+            if shutdown_event.is_set():
+                # Give threads time to clean up
+                for thread in threads:
+                    thread.join(timeout=2.0)
+                break
 
     except KeyboardInterrupt:
+        # This should be caught by the signal handler, but just in case
         handle_shutdown(None, None)
+
+    finally:
+        # Final cleanup
+        if not shutdown_event.is_set():
+            handle_shutdown(None, None)
+
+        # Wait a moment for final cleanup
+        time.sleep(0.5)
+
+        # Check if any servers are still running and force shutdown if needed
+        still_running = [
+            s for s in running_servers if hasattr(s, "_running") and s._running
+        ]
+        if still_running:
+            logger.warning(f"{len(still_running)} servers still running. Forcing exit.")
+        else:
+            logger.info("All servers have been shut down cleanly.")
+
+        logger.info("Exiting.")
+        sys.exit(0)
