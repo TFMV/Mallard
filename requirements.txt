@@ -1,9 +1,8 @@
+pyarrow
 duckdb
-pyarrow
-pyarrow
-pandas
-protobuf
-grpcio
-grpcio-tools
 cloudpickle
+pandas
+numpy
+grpcio
+protobuf
 watchdog
