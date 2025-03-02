@@ -18,21 +18,21 @@ Mallard demonstrates high-performance data streaming between DuckDB instances us
 
 You may see warnings like this in the server terminal:
 
-```
+```bash
 An input buffer was poorly aligned. This could lead to crashes or poor performance on some hardware.
 ```
 
 These warnings come from Apache Arrow's Acero execution engine and indicate memory alignment issues. While they don't prevent the application from working, they may impact performance.
 
-**Solutions:**
+**Note:** As of the latest version, these warnings are automatically suppressed in both the server and client code using Python's warnings module.
 
-1. **Configure Arrow to ignore alignment issues** (recommended):
+If you want to handle these warnings differently, you can:
 
-   Add this code at the beginning of your scripts:
+1. **Configure Arrow to ignore alignment issues** (if your Arrow version supports it):
 
    ```python
    import pyarrow as pa
-   pa.set_option("compute.allow_unaligned_buffers", True)
+   pa.set_option("compute.allow_unaligned_buffers", True)  # For newer Arrow versions
    ```
 
 2. **Ensure proper memory alignment** when creating Arrow arrays:
@@ -44,7 +44,7 @@ These warnings come from Apache Arrow's Acero execution engine and indicate memo
    table = pa.Table.from_pandas(df)
    ```
 
-3. **Suppress the warnings** if they're just noise:
+3. **Manually suppress the warnings** (already implemented in current version):
 
    ```python
    import warnings
@@ -53,12 +53,12 @@ These warnings come from Apache Arrow's Acero execution engine and indicate memo
 
 ## Benchmarks
 
-| Metric        | Value        | Throughput             |
-| ------------- | ------------ | ---------------------- |
-| GET time      | 0.32 seconds | 74,077,045 rows/second |
-| Transfer time | 0.44 seconds | 44,816,067 rows/second |
-| Exchange time | 0.53 seconds | 45,692,884 rows/second |
-| Total rows    | 24,000,000   |                        |
+| Metric        | Value      | Throughput              |
+| ------------- | ---------- | ----------------------- |
+| GET time      | 203.18 ms  | 118,119,463 rows/second |
+| Transfer time | 367.50 ms  | 52,093,044 rows/second  |
+| Exchange time | 472.36 ms  | 50,808,383 rows/second  |
+| Total rows    | 24,000,000 |                         |
 
 ## 🏗 Architecture
 
@@ -74,9 +74,26 @@ These warnings come from Apache Arrow's Acero execution engine and indicate memo
       ┌────▼─-───────────────────────▼─────┐
       │        demo.py (Flight Client)     │
       │  - do_get, do_put, do_exchange     │
-      │  - verifies, benchmarks, logs      │
+      │  - benchmarks, reports, metrics    │
       └────────────────────────────────────┘
 ```
+
+The system consists of:
+
+1. **Two DuckDB Flight Servers**:
+   - Each server runs an in-memory DuckDB instance by default
+   - Servers expose Arrow Flight interfaces for data operations
+   - Support for custom exchange protocols via registered handlers
+
+2. **Flight Client**:
+   - Connects to both servers for data transfer operations
+   - Implements benchmarking and performance measurement
+   - Provides formatted reporting of results
+
+3. **Data Flow**:
+   - GET: Client retrieves data from a server
+   - TRANSFER: Client moves data between servers
+   - EXCHANGE: Client sends data to server, receives processed results
 
 ## ⚙️ Requirements
 
@@ -103,6 +120,8 @@ python flight/flight_server.py
 ```bash
 python flight/demo.py
 ```
+
+The demo will automatically use the full 24 million row dataset from `data/flights.parquet` if available.
 
 ## 🔧 Configuration Options
 
@@ -139,18 +158,23 @@ The demo script performs these operations:
    - Runs a simple query to confirm connectivity
 
 2. **Basic Table Operations**
-   - Creates and populates table `foo` on Server1
+   - Creates and populates a simple table on Server1
    - Transfers it to Server2
 
 3. **Large Dataset Handling**
-   - Loads `flights.parquet` into memory
+   - Loads the full 24 million row dataset from `flights.parquet`
    - Transfers to Server1
    - Benchmarks transfer to Server2
 
 4. **Custom Exchange Demo**
-   - Uses `MyStreamingExchanger` for bidirectional streaming
-   - Adds a `processed` column during exchange
+   - Uses `CustomStreamingExchanger` for bidirectional streaming
+   - Processes data during exchange
    - Measures performance metrics
+
+5. **Benchmark Report**
+   - Generates a formatted report with color-coded metrics
+   - Shows throughput in rows per second for all operations
+   - Compares performance across different operations
 
 ## 🔒 Security
 
